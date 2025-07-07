@@ -1,9 +1,9 @@
 //! This crate provides Serde's two derive macros.
 //!
 //! ```edition2021
-//! # use serde_derive::{Deserialize, Serialize};
+//! # use serde_derive_rescript::{DeserializeDto, SerializeDto};
 //! #
-//! #[derive(Serialize, Deserialize)]
+//! #[derive(SerializeDto, DeserializeDto)]
 //! # struct S;
 //! #
 //! # fn main() {}
@@ -86,10 +86,11 @@ mod fragment;
 mod de;
 mod dummy;
 mod pretend;
+mod rescript;
 mod ser;
 mod this;
 
-#[proc_macro_derive(Serialize, attributes(serde))]
+#[proc_macro_derive(SerializeDto, attributes(serde))]
 pub fn derive_serialize(input: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(input as DeriveInput);
     ser::expand_derive_serialize(&mut input)
@@ -97,7 +98,7 @@ pub fn derive_serialize(input: TokenStream) -> TokenStream {
         .into()
 }
 
-#[proc_macro_derive(Deserialize, attributes(serde))]
+#[proc_macro_derive(DeserializeDto, attributes(serde))]
 pub fn derive_deserialize(input: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(input as DeriveInput);
     de::expand_derive_deserialize(&mut input)

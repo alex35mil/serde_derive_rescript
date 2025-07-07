@@ -517,18 +517,28 @@ impl Container {
             }
         }
 
+        let default_rename_all_rule = match &item.data {
+            syn::Data::Struct(_) => RenameRule::CamelCase,
+            syn::Data::Enum(_) => RenameRule::None,
+            syn::Data::Union(_) => RenameRule::None,
+        };
+
         Container {
             name: MultiName::from_attrs(Name::from(&unraw(&item.ident)), ser_name, de_name, None),
             transparent: transparent.get(),
             deny_unknown_fields: deny_unknown_fields.get(),
             default: default.get().unwrap_or(Default::None),
             rename_all_rules: RenameAllRules {
-                serialize: rename_all_ser_rule.get().unwrap_or(RenameRule::None),
-                deserialize: rename_all_de_rule.get().unwrap_or(RenameRule::None),
+                serialize: rename_all_ser_rule.get().unwrap_or(default_rename_all_rule),
+                deserialize: rename_all_de_rule.get().unwrap_or(default_rename_all_rule),
             },
             rename_all_fields_rules: RenameAllRules {
-                serialize: rename_all_fields_ser_rule.get().unwrap_or(RenameRule::None),
-                deserialize: rename_all_fields_de_rule.get().unwrap_or(RenameRule::None),
+                serialize: rename_all_fields_ser_rule
+                    .get()
+                    .unwrap_or(RenameRule::CamelCase),
+                deserialize: rename_all_fields_de_rule
+                    .get()
+                    .unwrap_or(RenameRule::CamelCase),
             },
             ser_bound: ser_bound.get(),
             de_bound: de_bound.get(),

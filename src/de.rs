@@ -2,7 +2,7 @@ use crate::fragment::{Expr, Fragment, Match, Stmts};
 use crate::internals::ast::{Container, Data, Field, Style, Variant};
 use crate::internals::name::Name;
 use crate::internals::{attr, replace_receiver, ungroup, Ctxt, Derive};
-use crate::{bound, dummy, pretend, this};
+use crate::{bound, dummy, pretend, rescript, this};
 use proc_macro2::{Literal, Span, TokenStream};
 use quote::{quote, quote_spanned, ToTokens};
 use std::collections::BTreeSet;
@@ -1227,12 +1227,28 @@ fn deserialize_homogeneous_enum(
     variants: &[Variant],
     cattrs: &attr::Container,
 ) -> Fragment {
+    let is_mixed = rescript::is_mixed_enum(variants);
+
     match cattrs.tag() {
-        attr::TagType::External => deserialize_externally_tagged_enum(params, variants, cattrs),
+        attr::TagType::External => {
+            if is_mixed {
+                deserialize_mixed_enum(params, variants, cattrs)
+            } else if variants.iter().any(|v| matches!(v.style, Style::Struct)) {
+                let tag = rescript::get_effective_tag(cattrs);
+                deserialize_internally_tagged_enum(params, variants, cattrs, &tag)
+            } else {
+                deserialize_externally_tagged_enum(params, variants, cattrs)
+            }
+        }
         attr::TagType::Internal { tag } => {
-            deserialize_internally_tagged_enum(params, variants, cattrs, tag)
+            if is_mixed {
+                deserialize_mixed_enum(params, variants, cattrs)
+            } else {
+                deserialize_internally_tagged_enum(params, variants, cattrs, tag)
+            }
         }
         attr::TagType::Adjacent { tag, content } => {
+            // NOTE: Not handling mixed enums with adjacent tagging because this is not how ReScript handles serde
             deserialize_adjacently_tagged_enum(params, variants, cattrs, tag, content)
         }
         attr::TagType::None => deserialize_untagged_enum(params, variants, cattrs),
@@ -1367,6 +1383,195 @@ fn deserialize_externally_tagged_enum(
             __deserializer,
             #type_name,
             VARIANTS,
+            __Visitor {
+                marker: _serde::__private::PhantomData::<#this_type #ty_generics>,
+                lifetime: _serde::__private::PhantomData,
+            },
+        )
+    }
+}
+
+fn deserialize_mixed_enum(
+    params: &Parameters,
+    variants: &[Variant],
+    cattrs: &attr::Container,
+) -> Fragment {
+    let this_type = &params.this_type;
+    let (de_impl_generics, de_ty_generics, ty_generics, where_clause) =
+        split_with_de_lifetime(params);
+    let delife = params.borrowed.de_lifetime();
+
+    let expecting = format!("mixed enum {}", params.type_name());
+    let expecting = cattrs.expecting().unwrap_or(&expecting);
+
+    let unit_variant_arms = variants
+        .iter()
+        .filter(|variant| {
+            !variant.attrs.skip_deserializing() && matches!(variant.style, Style::Unit)
+        })
+        .map(|variant| {
+            let variant_name = variant.attrs.name().deserialize_name();
+            let this_value = &params.this_value;
+            let variant_ident = &variant.ident;
+
+            quote! {
+                #variant_name => _serde::__private::Ok(#this_value::#variant_ident),
+            }
+        });
+
+    let unit_variant_names: Vec<_> = variants
+        .iter()
+        .filter(|variant| {
+            !variant.attrs.skip_deserializing() && matches!(variant.style, Style::Unit)
+        })
+        .map(|variant| variant.attrs.name().deserialize_name())
+        .collect();
+
+    let tag = rescript::get_effective_tag(cattrs);
+
+    let struct_variant_arms = variants
+        .iter()
+        .filter(|variant| {
+            !variant.attrs.skip_deserializing() && matches!(variant.style, Style::Struct)
+        })
+        .map(|variant| {
+            let variant_name = variant.attrs.name().deserialize_name();
+            let this_value = &params.this_value;
+            let variant_ident = &variant.ident;
+
+            let field_members = variant.fields.iter().map(|f| &f.member);
+            let field_deserializers = variant.fields.iter().map(|field| {
+                let field_name = field.attrs.name().deserialize_name();
+                let field_member = &field.member;
+                let field_ty = field.ty;
+                quote! {
+                    let mut #field_member: _serde::__private::Option<#field_ty> = _serde::__private::None;
+                    for (__field_key, __field_value) in &__fields_map {
+                        if __field_key == #field_name {
+                            let __field_deserializer = _serde::__private::de::ContentRefDeserializer::<__B::Error>::new(__field_value);
+                            #field_member = _serde::__private::Some(_serde::Deserialize::deserialize(__field_deserializer)?);
+                            break;
+                        }
+                    }
+                    let #field_member = match #field_member {
+                        _serde::__private::Some(__val) => __val,
+                        _serde::__private::None => return _serde::__private::Err(_serde::de::Error::missing_field(#field_name)),
+                    };
+                }
+            });
+
+            quote! {
+                #variant_name => {
+                    #(#field_deserializers)*
+                    _serde::__private::Ok(#this_value::#variant_ident { #(#field_members),* })
+                },
+            }
+        });
+
+    let struct_variant_names: Vec<_> = variants
+        .iter()
+        .filter(|variant| {
+            !variant.attrs.skip_deserializing() && matches!(variant.style, Style::Struct)
+        })
+        .map(|variant| variant.attrs.name().deserialize_name())
+        .collect();
+
+    quote_block! {
+        #[doc(hidden)]
+        struct __Visitor #de_impl_generics #where_clause {
+            marker: _serde::__private::PhantomData<#this_type #ty_generics>,
+            lifetime: _serde::__private::PhantomData<&#delife ()>,
+        }
+
+        #[automatically_derived]
+        impl #de_impl_generics _serde::de::Visitor<#delife> for __Visitor #de_ty_generics #where_clause {
+            type Value = #this_type #ty_generics;
+
+            fn expecting(&self, __formatter: &mut _serde::__private::Formatter) -> _serde::__private::fmt::Result {
+                _serde::__private::Formatter::write_str(__formatter, #expecting)
+            }
+
+            fn visit_str<__E>(self, __value: &str) -> _serde::__private::Result<Self::Value, __E>
+            where
+                __E: _serde::de::Error,
+            {
+                match __value {
+                    #(#unit_variant_arms)*
+                    _ => {
+                        let __expected = &[#(#unit_variant_names),*];
+                        _serde::__private::Err(_serde::de::Error::unknown_variant(__value, __expected))
+                    }
+                }
+            }
+
+            fn visit_map<__A>(self, mut __map: __A) -> _serde::__private::Result<Self::Value, __A::Error>
+            where
+                __A: _serde::de::MapAccess<#delife>,
+            {
+                let __map_deserializer = _serde::de::value::MapAccessDeserializer::new(__map);
+
+                use _serde::de::IntoDeserializer;
+                let __result = {
+                    #[doc(hidden)]
+                    struct __InternalVisitor #de_impl_generics #where_clause {
+                        marker: _serde::__private::PhantomData<#this_type #ty_generics>,
+                        lifetime: _serde::__private::PhantomData<&#delife ()>,
+                    }
+
+                    impl #de_impl_generics _serde::de::Visitor<#delife> for __InternalVisitor #de_ty_generics #where_clause {
+                        type Value = #this_type #ty_generics;
+
+                        fn expecting(&self, __formatter: &mut _serde::__private::Formatter) -> _serde::__private::fmt::Result {
+                            _serde::__private::Formatter::write_str(__formatter, "internally tagged enum")
+                        }
+
+                        fn visit_map<__B>(self, mut __map: __B) -> _serde::__private::Result<Self::Value, __B::Error>
+                        where
+                            __B: _serde::de::MapAccess<#delife>,
+                        {
+                            let mut __variant_name: _serde::__private::Option<String> = _serde::__private::None;
+                            let mut __fields_map: _serde::__private::Vec<(String, _serde::__private::de::Content)> = _serde::__private::Vec::new();
+
+                            while let _serde::__private::Some(__key) = _serde::de::MapAccess::next_key::<String>(&mut __map)? {
+                                if __key == #tag {
+                                    if __variant_name.is_some() {
+                                        return _serde::__private::Err(_serde::de::Error::duplicate_field(#tag));
+                                    }
+                                    __variant_name = _serde::__private::Some(_serde::de::MapAccess::next_value(&mut __map)?);
+                                } else {
+                                    let __value: _serde::__private::de::Content = _serde::de::MapAccess::next_value(&mut __map)?;
+                                    __fields_map.push((__key, __value));
+                                }
+                            }
+
+                            let __variant_name = match __variant_name {
+                                _serde::__private::Some(__name) => __name,
+                                _serde::__private::None => return _serde::__private::Err(_serde::de::Error::missing_field(#tag)),
+                            };
+
+                            match __variant_name.as_str() {
+                                #(#struct_variant_arms)*
+                                _ => {
+                                    let __expected = &[#(#struct_variant_names),*];
+                                    _serde::__private::Err(_serde::de::Error::unknown_variant(&__variant_name, __expected))
+                                }
+                            }
+                        }
+                    }
+
+                    let __visitor = __InternalVisitor {
+                        marker: _serde::__private::PhantomData,
+                        lifetime: _serde::__private::PhantomData,
+                    };
+
+                    _serde::Deserializer::deserialize_map(__map_deserializer, __visitor)
+                };
+                __result
+            }
+        }
+
+        _serde::Deserializer::deserialize_any(
+            __deserializer,
             __Visitor {
                 marker: _serde::__private::PhantomData::<#this_type #ty_generics>,
                 lifetime: _serde::__private::PhantomData,

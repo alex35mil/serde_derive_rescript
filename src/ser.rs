@@ -2,7 +2,7 @@ use crate::fragment::{Fragment, Match, Stmts};
 use crate::internals::ast::{Container, Data, Field, Style, Variant};
 use crate::internals::name::Name;
 use crate::internals::{attr, replace_receiver, Ctxt, Derive};
-use crate::{bound, dummy, pretend, this};
+use crate::{bound, dummy, pretend, rescript, this};
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, quote_spanned};
 use syn::spanned::Spanned;
@@ -393,12 +393,13 @@ fn serialize_enum(params: &Parameters, variants: &[Variant], cattrs: &attr::Cont
     assert!(variants.len() as u64 <= u64::from(u32::MAX));
 
     let self_var = &params.self_var;
+    let is_mixed = rescript::is_mixed_enum(variants);
 
     let mut arms: Vec<_> = variants
         .iter()
         .enumerate()
         .map(|(variant_index, variant)| {
-            serialize_variant(params, variant, variant_index as u32, cattrs)
+            serialize_variant(params, variant, variant_index as u32, cattrs, is_mixed)
         })
         .collect();
 
@@ -420,6 +421,7 @@ fn serialize_variant(
     variant: &Variant,
     variant_index: u32,
     cattrs: &attr::Container,
+    is_mixed_enum: bool,
 ) -> TokenStream {
     let this_value = &params.this_value;
     let variant_ident = &variant.ident;
@@ -469,25 +471,83 @@ fn serialize_variant(
             }
         };
 
-        let body = Match(match (cattrs.tag(), variant.attrs.untagged()) {
-            (attr::TagType::External, false) => {
-                serialize_externally_tagged_variant(params, variant, variant_index, cattrs)
+        let body = Match(if is_mixed_enum {
+            // For mixed enums with external tagging, use custom serialization
+            let variant_name = variant.attrs.name().serialize_name();
+            match variant.style {
+                Style::Unit => {
+                    // Unit variants are serialized as strings
+                    quote_expr! {
+                        _serde::Serializer::serialize_str(__serializer, #variant_name)
+                    }
+                }
+                Style::Struct => {
+                    // Named variants are serialized with internal tagging using effective tag
+                    let tag = rescript::get_effective_tag(cattrs);
+                    serialize_internally_tagged_variant(params, variant, cattrs, &tag)
+                }
+                Style::Newtype | Style::Tuple => {
+                    // For newtype and tuple variants, fall back to external tagging
+                    // Those shouldn't be used for ReScript DTOs anyways, so doesn't matter
+                    serialize_externally_tagged_variant(params, variant, variant_index, cattrs)
+                }
             }
-            (attr::TagType::Internal { tag }, false) => {
-                serialize_internally_tagged_variant(params, variant, cattrs, tag)
-            }
-            (attr::TagType::Adjacent { tag, content }, false) => {
-                serialize_adjacently_tagged_variant(
-                    params,
-                    variant,
-                    cattrs,
-                    variant_index,
-                    tag,
-                    content,
-                )
-            }
-            (attr::TagType::None, _) | (_, true) => {
-                serialize_untagged_variant(params, variant, cattrs)
+        } else if matches!(variant.style, Style::Struct)
+            && matches!(cattrs.tag(), attr::TagType::External)
+            && !variant.attrs.untagged()
+        {
+            // For non-mixed enums with struct variants and external tagging, use internal tagging
+            let tag = rescript::get_effective_tag(cattrs);
+            serialize_internally_tagged_variant(params, variant, cattrs, &tag)
+        } else {
+            // Original behavior for non-mixed enums or different tag types
+            match (cattrs.tag(), variant.attrs.untagged()) {
+                (attr::TagType::External, false) => {
+                    serialize_externally_tagged_variant(params, variant, variant_index, cattrs)
+                }
+                (attr::TagType::Internal { tag }, false) => {
+                    if is_mixed_enum {
+                        // For mixed enums with internal tagging, use custom serialization
+                        let variant_name = variant.attrs.name().serialize_name();
+                        match variant.style {
+                            Style::Unit => {
+                                // Unit variants are serialized as strings
+                                quote_expr! {
+                                    _serde::Serializer::serialize_str(__serializer, #variant_name)
+                                }
+                            }
+                            Style::Struct => {
+                                // Named variants are serialized with internal tagging using effective tag
+                                let tag = rescript::get_effective_tag(cattrs);
+                                serialize_internally_tagged_variant(params, variant, cattrs, &tag)
+                            }
+                            Style::Newtype | Style::Tuple => {
+                                // For newtype and tuple variants, fall back to external tagging
+                                serialize_externally_tagged_variant(
+                                    params,
+                                    variant,
+                                    variant_index,
+                                    cattrs,
+                                )
+                            }
+                        }
+                    } else {
+                        serialize_internally_tagged_variant(params, variant, cattrs, tag)
+                    }
+                }
+                (attr::TagType::Adjacent { tag, content }, false) => {
+                    serialize_adjacently_tagged_variant(
+                        params,
+                        variant,
+                        cattrs,
+                        variant_index,
+                        tag,
+                        content,
+                    )
+                }
+                (attr::TagType::None, _) | (_, true) => {
+                    serialize_untagged_variant(params, variant, cattrs)
+                }
             }
         });
 

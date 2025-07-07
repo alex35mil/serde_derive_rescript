@@ -1,17 +1,14 @@
 [package]
-name = "serde_derive"
-version = "1.0.219"
-authors = ["Erick Tryzelaar <erick.tryzelaar@gmail.com>", "David Tolnay <dtolnay@gmail.com>"]
+name = "serde_derive_rescript"
+version = "0.0.1"
+authors = ["Erick Tryzelaar <erick.tryzelaar@gmail.com>", "David Tolnay <dtolnay@gmail.com>", "Alex Fedoseev <alex.fedoseev@gmail.com>"]
 categories = ["no-std", "no-std::no-alloc"]
-description = "Macros 1.1 implementation of #[derive(Serialize, Deserialize)]"
-documentation = "https://serde.rs/derive.html"
+description = "serde_derive patch for ReScript"
 edition = "2021"
 exclude = ["build.rs"]
-homepage = "https://serde.rs"
-keywords = ["serde", "serialization", "no_std", "derive"]
+keywords = ["serde", "serialization", "no_std", "derive", "rescript"]
 license = "MIT OR Apache-2.0"
-readme = "crates-io.md"
-repository = "https://github.com/serde-rs/serde"
+repository = "https://github.com/alex35mil/serde_derive_rescript"
 rust-version = "1.61"
 
 [features]
@@ -19,16 +16,17 @@ default = []
 deserialize_in_place = []
 
 [lib]
-name = "serde_derive"
+name = "serde_derive_rescript"
 proc-macro = true
 
 [dependencies]
-proc-macro2 = { workspace = true, features = ["proc-macro"] }
-quote = { workspace = true, features = ["proc-macro"] }
-syn = { workspace = true, features = ["clone-impls", "derive", "parsing", "printing", "proc-macro"] }
+proc-macro2 = { version = "1.0.74", default-features = false, features = ["proc-macro"] }
+quote = { version = "1.0.35", default-features = false, features = ["proc-macro"] }
+syn = { version = "2.0.81", default-features = false, features = ["clone-impls", "derive", "parsing", "printing", "proc-macro"] }
 
 [dev-dependencies]
-serde = { version = "1", path = "../serde" }
+serde = "1"
+serde_json = "1"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
