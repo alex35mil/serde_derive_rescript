@@ -1,4 +1,4 @@
-//! This crate provides Serde's two derive macros.
+//! This crate provides ReScript-compatible derive macros for serde.
 //!
 //! ```edition2021
 //! # use serde_derive_rescript::{DeserializeDto, SerializeDto};
@@ -8,12 +8,8 @@
 //! #
 //! # fn main() {}
 //! ```
-//!
-//! Please refer to [https://serde.rs/derive.html] for how to set this up.
-//!
-//! [https://serde.rs/derive.html]: https://serde.rs/derive.html
 
-#![doc(html_root_url = "https://docs.rs/serde_derive/1.0.219")]
+#![doc(html_root_url = "https://docs.rs/serde_derive/1.0.228")]
 #![cfg_attr(not(check_cfg), allow(unexpected_cfgs))]
 // Ignored clippy lints
 #![allow(
@@ -75,6 +71,8 @@ extern crate proc_macro;
 mod internals;
 
 use proc_macro::TokenStream;
+use proc_macro2::{Ident, Span};
+use quote::{ToTokens, TokenStreamExt as _};
 use syn::parse_macro_input;
 use syn::DeriveInput;
 
@@ -84,11 +82,32 @@ mod bound;
 mod fragment;
 
 mod de;
+mod deprecated;
 mod dummy;
 mod pretend;
 mod rescript;
 mod ser;
 mod this;
+
+// Serde 1.0.X exports __privateX where X is the patch version.
+// Our crate version matches serde's, so we use CARGO_PKG_VERSION_PATCH.
+#[allow(non_camel_case_types)]
+struct private;
+
+impl private {
+    fn ident(&self) -> Ident {
+        Ident::new(
+            concat!("__private", env!("CARGO_PKG_VERSION_PATCH")),
+            Span::call_site(),
+        )
+    }
+}
+
+impl ToTokens for private {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        tokens.append(self.ident());
+    }
+}
 
 #[proc_macro_derive(SerializeDto, attributes(serde))]
 pub fn derive_serialize(input: TokenStream) -> TokenStream {

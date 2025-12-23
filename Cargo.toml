@@ -1,6 +1,6 @@
 [package]
 name = "serde_derive_rescript"
-version = "0.0.1"
+version = "1.0.228"  # Must match serde version
 authors = ["Erick Tryzelaar <erick.tryzelaar@gmail.com>", "David Tolnay <dtolnay@gmail.com>", "Alex Fedoseev <alex.fedoseev@gmail.com>"]
 categories = ["no-std", "no-std::no-alloc"]
 description = "serde_derive patch for ReScript"
@@ -9,7 +9,7 @@ exclude = ["build.rs"]
 keywords = ["serde", "serialization", "no_std", "derive", "rescript"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/alex35mil/serde_derive_rescript"
-rust-version = "1.61"
+rust-version = "1.68"
 
 [features]
 default = []
@@ -23,9 +23,15 @@ proc-macro = true
 proc-macro2 = { version = "1.0.74", default-features = false, features = ["proc-macro"] }
 quote = { version = "1.0.35", default-features = false, features = ["proc-macro"] }
 syn = { version = "2.0.81", default-features = false, features = ["clone-impls", "derive", "parsing", "printing", "proc-macro"] }
+# Serde 1.0.225+ uses versioned private modules (__private225, __private226, etc.)
+# that must match between serde and serde_derive. Our crate version mirrors serde's
+# (see lib.rs which uses CARGO_PKG_VERSION_PATCH), so we pin to the exact version
+# here. This ensures Cargo fails with a clear version conflict if consumer uses
+# a different serde version, rather than a cryptic "__privateXXX not found" error.
+serde = "=1.0.228"
 
 [dev-dependencies]
-serde = "1"
+serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1"
 
 [package.metadata.docs.rs]

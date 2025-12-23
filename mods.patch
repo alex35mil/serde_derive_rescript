@@ -1,492 +1,323 @@
-diff --git a/Cargo.lock b/Cargo.lock
-index 4c58d08..16376d9 100644
---- a/Cargo.lock
-+++ b/Cargo.lock
-@@ -44,18 +44,7 @@ version = "1.0.219"
- source = "registry+https://github.com/rust-lang/crates.io-index"
- checksum = "5f0e2c6ed6606019b4e29e69dbaba95b11854410e5347d525002456dbbb786b6"
- dependencies = [
-- "serde_derive 1.0.219 (registry+https://github.com/rust-lang/crates.io-index)",
--]
--
--[[package]]
--name = "serde_derive"
--version = "1.0.219"
--dependencies = [
-- "proc-macro2",
-- "quote",
-- "serde",
-- "serde_json",
-- "syn",
-+ "serde_derive",
- ]
- 
- [[package]]
-@@ -69,6 +58,17 @@ dependencies = [
-  "syn",
- ]
- 
-+[[package]]
-+name = "serde_derive_rescript"
-+version = "0.0.1"
-+dependencies = [
-+ "proc-macro2",
-+ "quote",
-+ "serde",
-+ "serde_json",
-+ "syn",
-+]
-+
- [[package]]
- name = "serde_json"
- version = "1.0.140"
-diff --git a/Cargo.toml b/Cargo.toml
-index bce3231..afaccbb 100644
---- a/Cargo.toml
-+++ b/Cargo.toml
-@@ -1,17 +1,14 @@
- [package]
--name = "serde_derive"
--version = "1.0.219"
--authors = ["Erick Tryzelaar <erick.tryzelaar@gmail.com>", "David Tolnay <dtolnay@gmail.com>"]
-+name = "serde_derive_rescript"
-+version = "0.0.1"
-+authors = ["Erick Tryzelaar <erick.tryzelaar@gmail.com>", "David Tolnay <dtolnay@gmail.com>", "Alex Fedoseev <alex.fedoseev@gmail.com>"]
- categories = ["no-std", "no-std::no-alloc"]
--description = "Macros 1.1 implementation of #[derive(Serialize, Deserialize)]"
--documentation = "https://serde.rs/derive.html"
-+description = "serde_derive patch for ReScript"
- edition = "2021"
- exclude = ["build.rs"]
--homepage = "https://serde.rs"
--keywords = ["serde", "serialization", "no_std", "derive"]
-+keywords = ["serde", "serialization", "no_std", "derive", "rescript"]
- license = "MIT OR Apache-2.0"
--readme = "crates-io.md"
--repository = "https://github.com/serde-rs/serde"
-+repository = "https://github.com/alex35mil/serde_derive_rescript"
- rust-version = "1.61"
- 
- [features]
-@@ -19,16 +16,17 @@ default = []
- deserialize_in_place = []
- 
- [lib]
--name = "serde_derive"
-+name = "serde_derive_rescript"
- proc-macro = true
- 
- [dependencies]
--proc-macro2 = { workspace = true, features = ["proc-macro"] }
--quote = { workspace = true, features = ["proc-macro"] }
--syn = { workspace = true, features = ["clone-impls", "derive", "parsing", "printing", "proc-macro"] }
-+proc-macro2 = { version = "1.0.74", default-features = false, features = ["proc-macro"] }
-+quote = { version = "1.0.35", default-features = false, features = ["proc-macro"] }
-+syn = { version = "2.0.81", default-features = false, features = ["clone-impls", "derive", "parsing", "printing", "proc-macro"] }
- 
- [dev-dependencies]
--serde = { version = "1", path = "../serde" }
-+serde = "1"
-+serde_json = "1"
- 
- [package.metadata.docs.rs]
- targets = ["x86_64-unknown-linux-gnu"]
-diff --git a/README.md b/README.md
-index eda660c..837cb5f 100644
---- a/README.md
-+++ b/README.md
-@@ -1,102 +1,52 @@
--# Serde &emsp; [![Build Status]][actions] [![Latest Version]][crates.io] [![serde msrv]][Rust 1.56] [![serde_derive msrv]][Rust 1.61]
-+# serde_derive_rescript
- 
--[Build Status]: https://img.shields.io/github/actions/workflow/status/serde-rs/serde/ci.yml?branch=master
--[actions]: https://github.com/serde-rs/serde/actions?query=branch%3Amaster
--[Latest Version]: https://img.shields.io/crates/v/serde.svg
--[crates.io]: https://crates.io/crates/serde
--[serde msrv]: https://img.shields.io/crates/msrv/serde.svg?label=serde%20msrv&color=lightgray
--[serde_derive msrv]: https://img.shields.io/crates/msrv/serde_derive.svg?label=serde_derive%20msrv&color=lightgray
--[Rust 1.56]: https://blog.rust-lang.org/2021/10/21/Rust-1.56.0.html
--[Rust 1.61]: https://blog.rust-lang.org/2022/05/19/Rust-1.61.0.html
-+📝 This is a fork of [`serde_derive`](https://github.com/serde-rs/serde) crate that patches the original macros to work with ReScript's [`sury`](https://github.com/DZakh/sury) ppx.
- 
--**Serde is a framework for *ser*ializing and *de*serializing Rust data structures efficiently and generically.**
-+The key differences are:
-+1. camelCase by default
-+2. Serialization/deserialization of enums matches the way ReScript handles tagged unions:
-+
-+```rust
-+ #[derive(SerializeDto, DeserializeDto)]
-+enum T {
-+  A,
-+  B { enum_field: usize },
-+}
-+
-+T::A // -> "A"
-+T::B { enum_field: 42 } // -> { "TAG": "B", "enumField": 42 }
-+```
-+
-+This way, serde on both ends is pretty much effortless:
-+
-+```rust
-+// Rust
-+#[derive(SerializeDto, DeserializeDto)]
-+enum NameError {
-+    Empty,
-+    TooShort { min: usize, max: usize },
-+}
-+```
-+
-+```rescript
-+// ReScript
-+module NameError = {
-+    @schema
-+    type t =
-+        | Empty
-+        | TooShort({min: int, max: int})
-+}
-+```
- 
- ---
- 
--You may be looking for:
-+I didn't publish this crate anywhere. I'm using it in my project from this repo. I can push it to crates if there's any interest - let me know in the issues.
- 
--- [An overview of Serde](https://serde.rs/)
--- [Data formats supported by Serde](https://serde.rs/#data-formats)
--- [Setting up `#[derive(Serialize, Deserialize)]`](https://serde.rs/derive.html)
--- [Examples](https://serde.rs/examples.html)
--- [API documentation](https://docs.rs/serde)
--- [Release notes](https://github.com/serde-rs/serde/releases)
-+---
- 
--## Serde in action
-+Base commit: [`babafa54d283fb087fa94f50a2cf82fa9e582a7c`](https://github.com/serde-rs/serde/commit/babafa54d283fb087fa94f50a2cf82fa9e582a7c)
- 
--<details>
--<summary>
--Click to show Cargo.toml.
--<a href="https://play.rust-lang.org/?edition=2021&gist=72755f28f99afc95e01d63174b28c1f5" target="_blank">Run this code in the playground.</a>
--</summary>
--
--```toml
--[dependencies]
--
--# The core APIs, including the Serialize and Deserialize traits. Always
--# required when using Serde. The "derive" feature is only required when
--# using #[derive(Serialize, Deserialize)] to make Serde work with structs
--# and enums defined in your crate.
--serde = { version = "1.0", features = ["derive"] }
--
--# Each data format lives in its own crate; the sample code below uses JSON
--# but you may be using a different one.
--serde_json = "1.0"
--```
--
--</details>
--<p></p>
--
--```rust
--use serde::{Deserialize, Serialize};
--
--#[derive(Serialize, Deserialize, Debug)]
--struct Point {
--    x: i32,
--    y: i32,
--}
--
--fn main() {
--    let point = Point { x: 1, y: 2 };
--
--    // Convert the Point to a JSON string.
--    let serialized = serde_json::to_string(&point).unwrap();
--
--    // Prints serialized = {"x":1,"y":2}
--    println!("serialized = {}", serialized);
--
--    // Convert the JSON string back to a Point.
--    let deserialized: Point = serde_json::from_str(&serialized).unwrap();
--
--    // Prints deserialized = Point { x: 1, y: 2 }
--    println!("deserialized = {:?}", deserialized);
--}
--```
--
--## Getting help
--
--Serde is one of the most widely used Rust libraries so any place that Rustaceans
--congregate will be able to help you out. For chat, consider trying the
--[#rust-questions] or [#rust-beginners] channels of the unofficial community
--Discord (invite: <https://discord.gg/rust-lang-community>), the [#rust-usage] or
--[#beginners] channels of the official Rust Project Discord (invite:
--<https://discord.gg/rust-lang>), or the [#general][zulip] stream in Zulip. For
--asynchronous, consider the [\[rust\] tag on StackOverflow][stackoverflow], the
--[/r/rust] subreddit which has a pinned weekly easy questions post, or the Rust
--[Discourse forum][discourse]. It's acceptable to file a support issue in this
--repo but they tend not to get as many eyes as any of the above and may get
--closed without a response after some time.
--
--[#rust-questions]: https://discord.com/channels/273534239310479360/274215136414400513
--[#rust-beginners]: https://discord.com/channels/273534239310479360/273541522815713281
--[#rust-usage]: https://discord.com/channels/442252698964721669/443150878111694848
--[#beginners]: https://discord.com/channels/442252698964721669/448238009733742612
--[zulip]: https://rust-lang.zulipchat.com/#narrow/stream/122651-general
--[stackoverflow]: https://stackoverflow.com/questions/tagged/rust
--[/r/rust]: https://www.reddit.com/r/rust
--[discourse]: https://users.rust-lang.org
--
--<br>
-+---
- 
- #### License
- 
-diff --git a/src/de.rs b/src/de.rs
-index 4967e35..f1d8462 100644
---- a/src/de.rs
-+++ b/src/de.rs
-@@ -2,7 +2,7 @@ use crate::fragment::{Expr, Fragment, Match, Stmts};
- use crate::internals::ast::{Container, Data, Field, Style, Variant};
- use crate::internals::name::Name;
- use crate::internals::{attr, replace_receiver, ungroup, Ctxt, Derive};
--use crate::{bound, dummy, pretend, this};
-+use crate::{bound, dummy, pretend, rescript, this};
- use proc_macro2::{Literal, Span, TokenStream};
- use quote::{quote, quote_spanned, ToTokens};
- use std::collections::BTreeSet;
-@@ -1227,12 +1227,28 @@ fn deserialize_homogeneous_enum(
+diff -ruN /tmp/serde_upstream/serde_derive/src/de/enum_.rs /Users/Alex/Dev/serde_derive_rescript/src/de/enum_.rs
+--- /tmp/serde_upstream/serde_derive/src/de/enum_.rs	2025-12-23 21:38:51
++++ /Users/Alex/Dev/serde_derive_rescript/src/de/enum_.rs	2025-12-23 21:01:16
+@@ -1,13 +1,15 @@
+ use crate::de::enum_adjacently;
+ use crate::de::enum_externally;
+ use crate::de::enum_internally;
++use crate::de::enum_mixed;
+ use crate::de::enum_untagged;
+ use crate::de::identifier;
+ use crate::de::{field_i, FieldWithAliases, Parameters};
+ use crate::fragment::{Expr, Fragment, Stmts};
+-use crate::internals::ast::Variant;
++use crate::internals::ast::{Style, Variant};
+ use crate::internals::attr;
+ use crate::private;
++use crate::rescript;
+ use proc_macro2::TokenStream;
+ use quote::quote;
+
+@@ -41,10 +43,28 @@
      variants: &[Variant],
      cattrs: &attr::Container,
  ) -> Fragment {
++    // ReScript: detect mixed enums (both unit and struct variants)
 +    let is_mixed = rescript::is_mixed_enum(variants);
 +
      match cattrs.tag() {
--        attr::TagType::External => deserialize_externally_tagged_enum(params, variants, cattrs),
+-        attr::TagType::External => enum_externally::deserialize(params, variants, cattrs),
 +        attr::TagType::External => {
++            // ReScript: handle mixed and struct-only enums specially
 +            if is_mixed {
-+                deserialize_mixed_enum(params, variants, cattrs)
++                enum_mixed::deserialize(params, variants, cattrs)
 +            } else if variants.iter().any(|v| matches!(v.style, Style::Struct)) {
++                // Non-mixed struct variants use internal tagging with TAG
 +                let tag = rescript::get_effective_tag(cattrs);
-+                deserialize_internally_tagged_enum(params, variants, cattrs, &tag)
++                enum_internally::deserialize(params, variants, cattrs, &tag)
 +            } else {
-+                deserialize_externally_tagged_enum(params, variants, cattrs)
++                enum_externally::deserialize(params, variants, cattrs)
 +            }
 +        }
          attr::TagType::Internal { tag } => {
--            deserialize_internally_tagged_enum(params, variants, cattrs, tag)
+-            enum_internally::deserialize(params, variants, cattrs, tag)
 +            if is_mixed {
-+                deserialize_mixed_enum(params, variants, cattrs)
++                enum_mixed::deserialize(params, variants, cattrs)
 +            } else {
-+                deserialize_internally_tagged_enum(params, variants, cattrs, tag)
++                enum_internally::deserialize(params, variants, cattrs, tag)
 +            }
          }
          attr::TagType::Adjacent { tag, content } => {
-+            // NOTE: Not handling mixed enums with adjacent tagging because this is not how ReScript handles serde
-             deserialize_adjacently_tagged_enum(params, variants, cattrs, tag, content)
-         }
-         attr::TagType::None => deserialize_untagged_enum(params, variants, cattrs),
-@@ -1375,6 +1391,195 @@ fn deserialize_externally_tagged_enum(
-     }
- }
- 
-+fn deserialize_mixed_enum(
+             enum_adjacently::deserialize(params, variants, cattrs, tag, content)
+diff -ruN /tmp/serde_upstream/serde_derive/src/de/enum_mixed.rs /Users/Alex/Dev/serde_derive_rescript/src/de/enum_mixed.rs
+--- /tmp/serde_upstream/serde_derive/src/de/enum_mixed.rs	1970-01-01 03:00:00
++++ /Users/Alex/Dev/serde_derive_rescript/src/de/enum_mixed.rs	2025-12-23 21:25:37
+@@ -0,0 +1,246 @@
++//! Deserialization for ReScript-style mixed enums (unit + struct variants).
++//!
++//! Mixed enums are deserialized as:
++//! - Unit variants: plain strings like `"VariantName"`
++//! - Struct variants: objects with TAG field like `{ "TAG": "VariantName", "field": value }`
++
++use crate::de::struct_;
++use crate::de::{field_i, Parameters, StructForm};
++use crate::fragment::{Fragment, Match};
++use crate::internals::ast::{Style, Variant};
++use crate::internals::attr;
++use crate::private;
++use crate::rescript;
++use quote::quote;
++
++/// Generates `Deserialize::deserialize` body for a mixed enum (unit + struct variants)
++pub(super) fn deserialize(
 +    params: &Parameters,
 +    variants: &[Variant],
 +    cattrs: &attr::Container,
 +) -> Fragment {
 +    let this_type = &params.this_type;
++    let this_value = &params.this_value;
 +    let (de_impl_generics, de_ty_generics, ty_generics, where_clause) =
-+        split_with_de_lifetime(params);
++        params.generics_with_de_lifetime();
 +    let delife = params.borrowed.de_lifetime();
 +
 +    let expecting = format!("mixed enum {}", params.type_name());
 +    let expecting = cattrs.expecting().unwrap_or(&expecting);
 +
-+    let unit_variant_arms = variants
-+        .iter()
-+        .filter(|variant| {
-+            !variant.attrs.skip_deserializing() && matches!(variant.style, Style::Unit)
-+        })
-+        .map(|variant| {
-+            let variant_name = variant.attrs.name().deserialize_name();
-+            let this_value = &params.this_value;
-+            let variant_ident = &variant.ident;
-+
-+            quote! {
-+                #variant_name => _serde::__private::Ok(#this_value::#variant_ident),
-+            }
-+        });
-+
-+    let unit_variant_names: Vec<_> = variants
-+        .iter()
-+        .filter(|variant| {
-+            !variant.attrs.skip_deserializing() && matches!(variant.style, Style::Unit)
-+        })
-+        .map(|variant| variant.attrs.name().deserialize_name())
-+        .collect();
-+
 +    let tag = rescript::get_effective_tag(cattrs);
 +
-+    let struct_variant_arms = variants
++    // Unit variants - deserialize from strings
++    let unit_variants: Vec<_> = variants
 +        .iter()
-+        .filter(|variant| {
-+            !variant.attrs.skip_deserializing() && matches!(variant.style, Style::Struct)
-+        })
-+        .map(|variant| {
-+            let variant_name = variant.attrs.name().deserialize_name();
-+            let this_value = &params.this_value;
-+            let variant_ident = &variant.ident;
-+
-+            let field_members = variant.fields.iter().map(|f| &f.member);
-+            let field_deserializers = variant.fields.iter().map(|field| {
-+                let field_name = field.attrs.name().deserialize_name();
-+                let field_member = &field.member;
-+                let field_ty = field.ty;
-+                quote! {
-+                    let mut #field_member: _serde::__private::Option<#field_ty> = _serde::__private::None;
-+                    for (__field_key, __field_value) in &__fields_map {
-+                        if __field_key == #field_name {
-+                            let __field_deserializer = _serde::__private::de::ContentRefDeserializer::<__B::Error>::new(__field_value);
-+                            #field_member = _serde::__private::Some(_serde::Deserialize::deserialize(__field_deserializer)?);
-+                            break;
-+                        }
-+                    }
-+                    let #field_member = match #field_member {
-+                        _serde::__private::Some(__val) => __val,
-+                        _serde::__private::None => return _serde::__private::Err(_serde::de::Error::missing_field(#field_name)),
-+                    };
-+                }
-+            });
-+
-+            quote! {
-+                #variant_name => {
-+                    #(#field_deserializers)*
-+                    _serde::__private::Ok(#this_value::#variant_ident { #(#field_members),* })
-+                },
-+            }
-+        });
-+
-+    let struct_variant_names: Vec<_> = variants
-+        .iter()
-+        .filter(|variant| {
-+            !variant.attrs.skip_deserializing() && matches!(variant.style, Style::Struct)
-+        })
-+        .map(|variant| variant.attrs.name().deserialize_name())
++        .enumerate()
++        .filter(|(_, v)| !v.attrs.skip_deserializing() && matches!(v.style, Style::Unit))
 +        .collect();
 +
++    let unit_variant_arms: Vec<_> = unit_variants
++        .iter()
++        .map(|(_, variant)| {
++            let variant_name = variant.attrs.name().deserialize_name();
++            let variant_ident = &variant.ident;
++            quote! {
++                #variant_name => _serde::#private::Ok(#this_value::#variant_ident),
++            }
++        })
++        .collect();
++
++    let unit_variant_names: Vec<_> = unit_variants
++        .iter()
++        .map(|(_, v)| v.attrs.name().deserialize_name())
++        .collect();
++
++    // Struct variants
++    let struct_variants: Vec<_> = variants
++        .iter()
++        .enumerate()
++        .filter(|(_, v)| !v.attrs.skip_deserializing() && matches!(v.style, Style::Struct))
++        .collect();
++
++    // Generate variant enum for struct variants
++    let struct_variant_field_idents: Vec<_> =
++        struct_variants.iter().map(|(i, _)| field_i(*i)).collect();
++
++    let struct_variant_names: Vec<_> = struct_variants
++        .iter()
++        .map(|(_, v)| v.attrs.name().deserialize_name())
++        .collect();
++
++    // Build variant enum match arms
++    let variant_match_arms: Vec<_> = struct_variants
++        .iter()
++        .map(|(i, v)| {
++            let name = v.attrs.name().deserialize_name();
++            let ident = field_i(*i);
++            quote! { #name => _serde::#private::Ok(__Field::#ident) }
++        })
++        .collect();
++
++    // Generate variant enum for struct variants (used to deserialize the TAG value)
++    let field_enum = if struct_variants.is_empty() {
++        quote! {}
++    } else {
++        quote! {
++            #[doc(hidden)]
++            enum __Field {
++                #(#struct_variant_field_idents,)*
++            }
++
++            impl<#delife> _serde::Deserialize<#delife> for __Field {
++                fn deserialize<__D>(__deserializer: __D) -> _serde::#private::Result<Self, __D::Error>
++                where
++                    __D: _serde::Deserializer<#delife>,
++                {
++                    struct __FieldVisitor;
++
++                    impl<#delife> _serde::de::Visitor<#delife> for __FieldVisitor {
++                        type Value = __Field;
++
++                        fn expecting(&self, __f: &mut _serde::#private::Formatter) -> _serde::#private::fmt::Result {
++                            _serde::#private::Formatter::write_str(__f, "variant identifier")
++                        }
++
++                        fn visit_str<__E>(self, __value: &str) -> _serde::#private::Result<Self::Value, __E>
++                        where
++                            __E: _serde::de::Error,
++                        {
++                            match __value {
++                                #(#variant_match_arms,)*
++                                _ => _serde::#private::Err(_serde::de::Error::unknown_variant(__value, &[#(#struct_variant_names),*])),
++                            }
++                        }
++                    }
++
++                    _serde::Deserializer::deserialize_identifier(__deserializer, __FieldVisitor)
++                }
++            }
++        }
++    };
++
++    // Generate match arms for struct variants using struct_::deserialize
++    let struct_variant_arms: Vec<_> = struct_variants
++        .iter()
++        .map(|(i, variant)| {
++            let variant_field = field_i(*i);
++            let variant_ident = &variant.ident;
++
++            let block = Match(struct_::deserialize(
++                params,
++                &variant.fields,
++                cattrs,
++                StructForm::InternallyTagged(variant_ident),
++            ));
++
++            quote! {
++                __Field::#variant_field => #block
++            }
++        })
++        .collect();
++
++    // For unit variants from string
++    let visit_str_body = if unit_variants.is_empty() {
++        quote! {
++            _serde::#private::Err(_serde::de::Error::custom("expected object with TAG field"))
++        }
++    } else {
++        quote! {
++            match __value {
++                #(#unit_variant_arms)*
++                _ => {
++                    let __expected = &[#(#unit_variant_names),*];
++                    _serde::#private::Err(_serde::de::Error::unknown_variant(__value, __expected))
++                }
++            }
++        }
++    };
++
++    // For struct variants from map: use TaggedContentVisitor pattern
++    let visit_map_body = if struct_variants.is_empty() {
++        quote! {
++            _serde::#private::Err(_serde::de::Error::custom("expected string for unit variant"))
++        }
++    } else {
++        quote! {
++            // Collect entries and extract TAG field (similar to TaggedContentVisitor)
++            let mut __tag: _serde::#private::Option<__Field> = _serde::#private::None;
++            let mut __vec = _serde::#private::Vec::<(
++                _serde::#private::de::Content<#delife>,
++                _serde::#private::de::Content<#delife>,
++            )>::new();
++
++            while let _serde::#private::Some(__key) = _serde::de::MapAccess::next_key_seed(&mut __map, _serde::#private::de::ContentVisitor::new())? {
++                // Check if this key matches the tag field
++                let __is_tag = match &__key {
++                    _serde::#private::de::Content::String(__s) => __s == #tag,
++                    _serde::#private::de::Content::Str(__s) => *__s == #tag,
++                    _ => false,
++                };
++                if __is_tag {
++                    if __tag.is_some() {
++                        return _serde::#private::Err(_serde::de::Error::duplicate_field(#tag));
++                    }
++                    __tag = _serde::#private::Some(_serde::de::MapAccess::next_value(&mut __map)?);
++                } else {
++                    let __v = _serde::de::MapAccess::next_value_seed(&mut __map, _serde::#private::de::ContentVisitor::new())?;
++                    __vec.push((__key, __v));
++                }
++            }
++
++            let __tag = match __tag {
++                _serde::#private::Some(__t) => __t,
++                _serde::#private::None => return _serde::#private::Err(_serde::de::Error::missing_field(#tag)),
++            };
++
++            // Create ContentDeserializer from the remaining fields
++            let __content = _serde::#private::de::Content::Map(__vec);
++            let __deserializer = _serde::#private::de::ContentDeserializer::<__A::Error>::new(__content);
++
++            match __tag {
++                #(#struct_variant_arms)*
++            }
++        }
++    };
++
 +    quote_block! {
++        #field_enum
++
 +        #[doc(hidden)]
 +        struct __Visitor #de_impl_generics #where_clause {
-+            marker: _serde::__private::PhantomData<#this_type #ty_generics>,
-+            lifetime: _serde::__private::PhantomData<&#delife ()>,
++            marker: _serde::#private::PhantomData<#this_type #ty_generics>,
++            lifetime: _serde::#private::PhantomData<&#delife ()>,
 +        }
 +
-+        #[automatically_derived]
 +        impl #de_impl_generics _serde::de::Visitor<#delife> for __Visitor #de_ty_generics #where_clause {
 +            type Value = #this_type #ty_generics;
 +
-+            fn expecting(&self, __formatter: &mut _serde::__private::Formatter) -> _serde::__private::fmt::Result {
-+                _serde::__private::Formatter::write_str(__formatter, #expecting)
++            fn expecting(&self, __formatter: &mut _serde::#private::Formatter) -> _serde::#private::fmt::Result {
++                _serde::#private::Formatter::write_str(__formatter, #expecting)
 +            }
 +
-+            fn visit_str<__E>(self, __value: &str) -> _serde::__private::Result<Self::Value, __E>
++            fn visit_str<__E>(self, __value: &str) -> _serde::#private::Result<Self::Value, __E>
 +            where
 +                __E: _serde::de::Error,
 +            {
-+                match __value {
-+                    #(#unit_variant_arms)*
-+                    _ => {
-+                        let __expected = &[#(#unit_variant_names),*];
-+                        _serde::__private::Err(_serde::de::Error::unknown_variant(__value, __expected))
-+                    }
-+                }
++                #visit_str_body
 +            }
 +
-+            fn visit_map<__A>(self, mut __map: __A) -> _serde::__private::Result<Self::Value, __A::Error>
++            fn visit_map<__A>(self, mut __map: __A) -> _serde::#private::Result<Self::Value, __A::Error>
 +            where
 +                __A: _serde::de::MapAccess<#delife>,
 +            {
-+                let __map_deserializer = _serde::de::value::MapAccessDeserializer::new(__map);
-+
-+                use _serde::de::IntoDeserializer;
-+                let __result = {
-+                    #[doc(hidden)]
-+                    struct __InternalVisitor #de_impl_generics #where_clause {
-+                        marker: _serde::__private::PhantomData<#this_type #ty_generics>,
-+                        lifetime: _serde::__private::PhantomData<&#delife ()>,
-+                    }
-+
-+                    impl #de_impl_generics _serde::de::Visitor<#delife> for __InternalVisitor #de_ty_generics #where_clause {
-+                        type Value = #this_type #ty_generics;
-+
-+                        fn expecting(&self, __formatter: &mut _serde::__private::Formatter) -> _serde::__private::fmt::Result {
-+                            _serde::__private::Formatter::write_str(__formatter, "internally tagged enum")
-+                        }
-+
-+                        fn visit_map<__B>(self, mut __map: __B) -> _serde::__private::Result<Self::Value, __B::Error>
-+                        where
-+                            __B: _serde::de::MapAccess<#delife>,
-+                        {
-+                            let mut __variant_name: _serde::__private::Option<String> = _serde::__private::None;
-+                            let mut __fields_map: _serde::__private::Vec<(String, _serde::__private::de::Content)> = _serde::__private::Vec::new();
-+
-+                            while let _serde::__private::Some(__key) = _serde::de::MapAccess::next_key::<String>(&mut __map)? {
-+                                if __key == #tag {
-+                                    if __variant_name.is_some() {
-+                                        return _serde::__private::Err(_serde::de::Error::duplicate_field(#tag));
-+                                    }
-+                                    __variant_name = _serde::__private::Some(_serde::de::MapAccess::next_value(&mut __map)?);
-+                                } else {
-+                                    let __value: _serde::__private::de::Content = _serde::de::MapAccess::next_value(&mut __map)?;
-+                                    __fields_map.push((__key, __value));
-+                                }
-+                            }
-+
-+                            let __variant_name = match __variant_name {
-+                                _serde::__private::Some(__name) => __name,
-+                                _serde::__private::None => return _serde::__private::Err(_serde::de::Error::missing_field(#tag)),
-+                            };
-+
-+                            match __variant_name.as_str() {
-+                                #(#struct_variant_arms)*
-+                                _ => {
-+                                    let __expected = &[#(#struct_variant_names),*];
-+                                    _serde::__private::Err(_serde::de::Error::unknown_variant(&__variant_name, __expected))
-+                                }
-+                            }
-+                        }
-+                    }
-+
-+                    let __visitor = __InternalVisitor {
-+                        marker: _serde::__private::PhantomData,
-+                        lifetime: _serde::__private::PhantomData,
-+                    };
-+
-+                    _serde::Deserializer::deserialize_map(__map_deserializer, __visitor)
-+                };
-+                __result
++                #visit_map_body
 +            }
 +        }
 +
 +        _serde::Deserializer::deserialize_any(
 +            __deserializer,
 +            __Visitor {
-+                marker: _serde::__private::PhantomData::<#this_type #ty_generics>,
-+                lifetime: _serde::__private::PhantomData,
++                marker: _serde::#private::PhantomData::<#this_type #ty_generics>,
++                lifetime: _serde::#private::PhantomData,
 +            },
 +        )
 +    }
 +}
-+
- fn deserialize_internally_tagged_enum(
-     params: &Parameters,
-     variants: &[Variant],
-diff --git a/src/internals/attr.rs b/src/internals/attr.rs
-index 6d846ed..717abb9 100644
---- a/src/internals/attr.rs
-+++ b/src/internals/attr.rs
-@@ -517,18 +517,28 @@ impl Container {
+diff -ruN /tmp/serde_upstream/serde_derive/src/de.rs /Users/Alex/Dev/serde_derive_rescript/src/de.rs
+--- /tmp/serde_upstream/serde_derive/src/de.rs	2025-12-23 21:38:51
++++ /Users/Alex/Dev/serde_derive_rescript/src/de.rs	2025-12-23 21:00:49
+@@ -16,6 +16,7 @@
+ mod enum_adjacently;
+ mod enum_externally;
+ mod enum_internally;
++mod enum_mixed;
+ mod enum_untagged;
+ mod identifier;
+ mod struct_;
+diff -ruN /tmp/serde_upstream/serde_derive/src/internals/attr.rs /Users/Alex/Dev/serde_derive_rescript/src/internals/attr.rs
+--- /tmp/serde_upstream/serde_derive/src/internals/attr.rs	2025-12-23 21:38:51
++++ /Users/Alex/Dev/serde_derive_rescript/src/internals/attr.rs	2025-12-23 21:25:45
+@@ -516,18 +516,29 @@
              }
          }
- 
+
++        // ReScript modification: default to camelCase for struct fields
 +        let default_rename_all_rule = match &item.data {
 +            syn::Data::Struct(_) => RenameRule::CamelCase,
 +            syn::Data::Enum(_) => RenameRule::None,
@@ -516,12 +347,12 @@ index 6d846ed..717abb9 100644
              },
              ser_bound: ser_bound.get(),
              de_bound: de_bound.get(),
-diff --git a/src/lib.rs b/src/lib.rs
-index a02ba99..2ff66b9 100644
---- a/src/lib.rs
-+++ b/src/lib.rs
-@@ -1,9 +1,9 @@
- //! This crate provides Serde's two derive macros.
+diff -ruN /tmp/serde_upstream/serde_derive/src/lib.rs /Users/Alex/Dev/serde_derive_rescript/src/lib.rs
+--- /tmp/serde_upstream/serde_derive/src/lib.rs	2025-12-23 21:38:51
++++ /Users/Alex/Dev/serde_derive_rescript/src/lib.rs	2025-12-23 22:26:16
+@@ -1,17 +1,13 @@
+-//! This crate provides Serde's two derive macros.
++//! This crate provides ReScript-compatible derive macros for serde.
  //!
  //! ```edition2021
 -//! # use serde_derive::{Deserialize, Serialize};
@@ -532,33 +363,48 @@ index a02ba99..2ff66b9 100644
  //! # struct S;
  //! #
  //! # fn main() {}
-@@ -86,10 +86,11 @@ mod fragment;
- mod de;
+ //! ```
+-//!
+-//! Please refer to [https://serde.rs/derive.html] for how to set this up.
+-//!
+-//! [https://serde.rs/derive.html]: https://serde.rs/derive.html
+
+ #![doc(html_root_url = "https://docs.rs/serde_derive/1.0.228")]
+ #![cfg_attr(not(check_cfg), allow(unexpected_cfgs))]
+@@ -89,9 +85,12 @@
+ mod deprecated;
  mod dummy;
  mod pretend;
 +mod rescript;
  mod ser;
  mod this;
- 
+
++// Serde 1.0.X exports __privateX where X is the patch version.
++// Our crate version matches serde's, so we use CARGO_PKG_VERSION_PATCH.
+ #[allow(non_camel_case_types)]
+ struct private;
+
+@@ -110,7 +109,7 @@
+     }
+ }
+
 -#[proc_macro_derive(Serialize, attributes(serde))]
 +#[proc_macro_derive(SerializeDto, attributes(serde))]
  pub fn derive_serialize(input: TokenStream) -> TokenStream {
      let mut input = parse_macro_input!(input as DeriveInput);
      ser::expand_derive_serialize(&mut input)
-@@ -97,7 +98,7 @@ pub fn derive_serialize(input: TokenStream) -> TokenStream {
+@@ -118,7 +117,7 @@
          .into()
  }
- 
+
 -#[proc_macro_derive(Deserialize, attributes(serde))]
 +#[proc_macro_derive(DeserializeDto, attributes(serde))]
  pub fn derive_deserialize(input: TokenStream) -> TokenStream {
      let mut input = parse_macro_input!(input as DeriveInput);
      de::expand_derive_deserialize(&mut input)
-diff --git a/src/rescript.rs b/src/rescript.rs
-new file mode 100644
-index 0000000..1e0ba7a
---- /dev/null
-+++ b/src/rescript.rs
+diff -ruN /tmp/serde_upstream/serde_derive/src/rescript.rs /Users/Alex/Dev/serde_derive_rescript/src/rescript.rs
+--- /tmp/serde_upstream/serde_derive/src/rescript.rs	1970-01-01 03:00:00
++++ /Users/Alex/Dev/serde_derive_rescript/src/rescript.rs	2025-12-23 20:55:39
 @@ -0,0 +1,27 @@
 +//! Utilities for handling enums with ReScript-style serialization.
 +
@@ -587,25 +433,27 @@ index 0000000..1e0ba7a
 +        _ => DEFAULT_TAG.to_string(),
 +    }
 +}
-diff --git a/src/ser.rs b/src/ser.rs
-index 46be736..4e73000 100644
---- a/src/ser.rs
-+++ b/src/ser.rs
-@@ -2,7 +2,7 @@ use crate::fragment::{Fragment, Match, Stmts};
+diff -ruN /tmp/serde_upstream/serde_derive/src/ser.rs /Users/Alex/Dev/serde_derive_rescript/src/ser.rs
+--- /tmp/serde_upstream/serde_derive/src/ser.rs	2025-12-23 21:38:51
++++ /Users/Alex/Dev/serde_derive_rescript/src/ser.rs	2025-12-23 21:25:45
+@@ -3,7 +3,7 @@
  use crate::internals::ast::{Container, Data, Field, Style, Variant};
  use crate::internals::name::Name;
  use crate::internals::{attr, replace_receiver, Ctxt, Derive};
--use crate::{bound, dummy, pretend, this};
-+use crate::{bound, dummy, pretend, rescript, this};
+-use crate::{bound, dummy, pretend, private, this};
++use crate::{bound, dummy, pretend, private, rescript, this};
  use proc_macro2::{Span, TokenStream};
  use quote::{quote, quote_spanned};
  use syn::spanned::Spanned;
-@@ -393,12 +393,13 @@ fn serialize_enum(params: &Parameters, variants: &[Variant], cattrs: &attr::Cont
+@@ -394,13 +394,16 @@
+ fn serialize_enum(params: &Parameters, variants: &[Variant], cattrs: &attr::Container) -> Fragment {
      assert!(variants.len() as u64 <= u64::from(u32::MAX));
- 
-     let self_var = &params.self_var;
+
++    // ReScript: detect mixed enums (both unit and struct variants)
 +    let is_mixed = rescript::is_mixed_enum(variants);
- 
++
+     let self_var = &params.self_var;
+
      let mut arms: Vec<_> = variants
          .iter()
          .enumerate()
@@ -614,8 +462,8 @@ index 46be736..4e73000 100644
 +            serialize_variant(params, variant, variant_index as u32, cattrs, is_mixed)
          })
          .collect();
- 
-@@ -420,6 +421,7 @@ fn serialize_variant(
+
+@@ -422,6 +425,7 @@
      variant: &Variant,
      variant_index: u32,
      cattrs: &attr::Container,
@@ -623,637 +471,55 @@ index 46be736..4e73000 100644
  ) -> TokenStream {
      let this_value = &params.this_value;
      let variant_ident = &variant.ident;
-@@ -469,25 +471,83 @@ fn serialize_variant(
-             }
-         };
- 
--        let body = Match(match (cattrs.tag(), variant.attrs.untagged()) {
--            (attr::TagType::External, false) => {
+@@ -473,10 +477,49 @@
+
+         let body = Match(match (cattrs.tag(), variant.attrs.untagged()) {
+             (attr::TagType::External, false) => {
 -                serialize_externally_tagged_variant(params, variant, variant_index, cattrs)
-+        let body = Match(if is_mixed_enum {
-+            // For mixed enums with external tagging, use custom serialization
-+            let variant_name = variant.attrs.name().serialize_name();
-+            match variant.style {
-+                Style::Unit => {
-+                    // Unit variants are serialized as strings
++                // ReScript: handle mixed enums and struct-only enums specially
++                if is_mixed_enum {
++                    match variant.style {
++                        Style::Unit => {
++                            // Unit variants in mixed enums serialize as strings
++                            let variant_name = variant.attrs.name().serialize_name();
++                            quote_expr! {
++                                _serde::Serializer::serialize_str(__serializer, #variant_name)
++                            }
++                        }
++                        Style::Struct => {
++                            // Struct variants in mixed enums use internal tagging with TAG
++                            let tag = rescript::get_effective_tag(cattrs);
++                            serialize_internally_tagged_variant(params, variant, cattrs, &tag)
++                        }
++                        _ => {
++                            // Newtype/Tuple: fall back to external tagging
++                            serialize_externally_tagged_variant(
++                                params,
++                                variant,
++                                variant_index,
++                                cattrs,
++                            )
++                        }
++                    }
++                } else if matches!(variant.style, Style::Struct) {
++                    // Non-mixed struct variants also use internal tagging with TAG
++                    let tag = rescript::get_effective_tag(cattrs);
++                    serialize_internally_tagged_variant(params, variant, cattrs, &tag)
++                } else {
++                    serialize_externally_tagged_variant(params, variant, variant_index, cattrs)
++                }
+             }
+             (attr::TagType::Internal { tag }, false) => {
+-                serialize_internally_tagged_variant(params, variant, cattrs, tag)
++                // ReScript: in mixed enums, unit variants serialize as plain strings
++                if is_mixed_enum && matches!(variant.style, Style::Unit) {
++                    let variant_name = variant.attrs.name().serialize_name();
 +                    quote_expr! {
 +                        _serde::Serializer::serialize_str(__serializer, #variant_name)
 +                    }
-+                }
-+                Style::Struct => {
-+                    // Named variants are serialized with internal tagging using effective tag
-+                    let tag = rescript::get_effective_tag(cattrs);
-+                    serialize_internally_tagged_variant(params, variant, cattrs, &tag)
-+                }
-+                Style::Newtype | Style::Tuple => {
-+                    // For newtype and tuple variants, fall back to external tagging
-+                    // Those shouldn't be used for ReScript DTOs anyways, so doesn't matter
-+                    serialize_externally_tagged_variant(params, variant, variant_index, cattrs)
++                } else {
++                    serialize_internally_tagged_variant(params, variant, cattrs, tag)
 +                }
              }
--            (attr::TagType::Internal { tag }, false) => {
--                serialize_internally_tagged_variant(params, variant, cattrs, tag)
--            }
--            (attr::TagType::Adjacent { tag, content }, false) => {
--                serialize_adjacently_tagged_variant(
--                    params,
--                    variant,
--                    cattrs,
--                    variant_index,
--                    tag,
--                    content,
--                )
--            }
--            (attr::TagType::None, _) | (_, true) => {
--                serialize_untagged_variant(params, variant, cattrs)
-+        } else if matches!(variant.style, Style::Struct)
-+            && matches!(cattrs.tag(), attr::TagType::External)
-+            && !variant.attrs.untagged()
-+        {
-+            // For non-mixed enums with struct variants and external tagging, use internal tagging
-+            let tag = rescript::get_effective_tag(cattrs);
-+            serialize_internally_tagged_variant(params, variant, cattrs, &tag)
-+        } else {
-+            // Original behavior for non-mixed enums or different tag types
-+            match (cattrs.tag(), variant.attrs.untagged()) {
-+                (attr::TagType::External, false) => {
-+                    serialize_externally_tagged_variant(params, variant, variant_index, cattrs)
-+                }
-+                (attr::TagType::Internal { tag }, false) => {
-+                    if is_mixed_enum {
-+                        // For mixed enums with internal tagging, use custom serialization
-+                        let variant_name = variant.attrs.name().serialize_name();
-+                        match variant.style {
-+                            Style::Unit => {
-+                                // Unit variants are serialized as strings
-+                                quote_expr! {
-+                                    _serde::Serializer::serialize_str(__serializer, #variant_name)
-+                                }
-+                            }
-+                            Style::Struct => {
-+                                // Named variants are serialized with internal tagging using effective tag
-+                                let tag = rescript::get_effective_tag(cattrs);
-+                                serialize_internally_tagged_variant(params, variant, cattrs, &tag)
-+                            }
-+                            Style::Newtype | Style::Tuple => {
-+                                // For newtype and tuple variants, fall back to external tagging
-+                                serialize_externally_tagged_variant(
-+                                    params,
-+                                    variant,
-+                                    variant_index,
-+                                    cattrs,
-+                                )
-+                            }
-+                        }
-+                    } else {
-+                        serialize_internally_tagged_variant(params, variant, cattrs, tag)
-+                    }
-+                }
-+                (attr::TagType::Adjacent { tag, content }, false) => {
-+                    serialize_adjacently_tagged_variant(
-+                        params,
-+                        variant,
-+                        cattrs,
-+                        variant_index,
-+                        tag,
-+                        content,
-+                    )
-+                }
-+                (attr::TagType::None, _) | (_, true) => {
-+                    serialize_untagged_variant(params, variant, cattrs)
-+                }
-             }
-         });
- 
-diff --git a/tests/enum.rs b/tests/enum.rs
-new file mode 100644
-index 0000000..7d2799f
---- /dev/null
-+++ b/tests/enum.rs
-@@ -0,0 +1,358 @@
-+use serde_derive_rescript::{DeserializeDto, SerializeDto};
-+use serde_json::{self as json, json};
-+
-+#[derive(SerializeDto, DeserializeDto, PartialEq, Debug)]
-+enum BasicEnum {
-+    Unit,
-+    Named { named_field: String },
-+}
-+
-+#[test]
-+fn test_enum_unit_member_serialization() {
-+    let value = BasicEnum::Unit;
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(serialized, json!("Unit"));
-+}
-+
-+#[test]
-+fn test_enum_member_with_named_fields_serialization() {
-+    let value = BasicEnum::Named {
-+        named_field: "named".to_string(),
-+    };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(serialized, json!({ "TAG": "Named", "namedField": "named" }));
-+}
-+
-+#[test]
-+fn test_enum_unit_member_deserialization() {
-+    let value = json!("Unit");
-+    let deserialized: BasicEnum = json::from_value(value).unwrap();
-+    assert_eq!(deserialized, BasicEnum::Unit);
-+}
-+
-+#[test]
-+fn test_enum_member_with_named_fields_deserialization() {
-+    let value = json!({ "TAG": "Named", "namedField": "named" });
-+    let deserialized: BasicEnum = json::from_value(value).unwrap();
-+    assert_eq!(
-+        deserialized,
-+        BasicEnum::Named {
-+            named_field: "named".to_string()
-+        },
-+    );
-+}
-+
-+#[derive(SerializeDto, DeserializeDto, PartialEq, Debug)]
-+#[serde(rename_all = "kebab-case")]
-+enum EnumWithRenameAllRule {
-+    UnitMember,
-+    MemberWithNamedField { named_field: String },
-+}
-+
-+#[test]
-+fn test_enum_with_rename_all_rule_serialization() {
-+    let value = EnumWithRenameAllRule::MemberWithNamedField {
-+        named_field: "named".to_string(),
-+    };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(
-+        serialized,
-+        json!({
-+            "TAG": "member-with-named-field",
-+            "namedField": "named"
-+        }),
-+    );
-+}
-+
-+#[test]
-+fn test_enum_with_rename_all_rule_deserialization() {
-+    let value = json!({
-+        "TAG": "member-with-named-field",
-+        "namedField": "named"
-+    });
-+    let deserialized: EnumWithRenameAllRule = json::from_value(value).unwrap();
-+    assert_eq!(
-+        deserialized,
-+        EnumWithRenameAllRule::MemberWithNamedField {
-+            named_field: "named".to_string(),
-+        },
-+    );
-+}
-+
-+#[derive(SerializeDto, DeserializeDto, PartialEq, Debug)]
-+#[serde(rename_all_fields = "kebab-case")]
-+enum EnumWithRenameAllFieldsRule {
-+    UnitMember,
-+    MemberWithNamedField { named_field: String },
-+}
-+
-+#[test]
-+fn test_enum_with_rename_all_fields_rule_serialization() {
-+    let value = EnumWithRenameAllFieldsRule::MemberWithNamedField {
-+        named_field: "named".to_string(),
-+    };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(
-+        serialized,
-+        json!({
-+            "TAG": "MemberWithNamedField",
-+            "named-field": "named"
-+        }),
-+    );
-+}
-+
-+#[test]
-+fn test_enum_with_rename_all_fields_rule_deserialization() {
-+    let value = json!({
-+        "TAG": "MemberWithNamedField",
-+        "named-field": "named"
-+    });
-+    let deserialized: EnumWithRenameAllFieldsRule = json::from_value(value).unwrap();
-+    assert_eq!(
-+        deserialized,
-+        EnumWithRenameAllFieldsRule::MemberWithNamedField {
-+            named_field: "named".to_string(),
-+        },
-+    );
-+}
-+
-+#[derive(SerializeDto, DeserializeDto, PartialEq, Debug)]
-+enum EnumWithRenamedMember {
-+    #[serde(rename = "u")]
-+    Unit,
-+}
-+
-+#[test]
-+fn test_enum_unit_memeber_with_renamed_member_serialization() {
-+    let value = EnumWithRenamedMember::Unit;
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(serialized, json!("u"));
-+}
-+
-+#[test]
-+fn test_enum_unit_memeber_with_renamed_member_deserialization() {
-+    let value = json!("u");
-+    let deserialized: EnumWithRenamedMember = json::from_value(value).unwrap();
-+    assert_eq!(deserialized, EnumWithRenamedMember::Unit);
-+}
-+
-+#[derive(SerializeDto, DeserializeDto, PartialEq, Debug)]
-+enum EnumWithRenamedField {
-+    Named {
-+        #[serde(rename = "f")]
-+        field: String,
-+    },
-+}
-+
-+#[test]
-+fn test_enum_member_with_renamed_field_serialization() {
-+    let value = EnumWithRenamedField::Named {
-+        field: "named".to_string(),
-+    };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(serialized, json!({ "TAG": "Named", "f": "named" }));
-+}
-+
-+#[test]
-+fn test_enum_member_with_renamed_field_deserialization() {
-+    let value = json!({ "TAG": "Named", "f": "named" });
-+    let deserialized: EnumWithRenamedField = json::from_value(value).unwrap();
-+    assert_eq!(
-+        deserialized,
-+        EnumWithRenamedField::Named {
-+            field: "named".to_string(),
-+        },
-+    );
-+}
-+
-+#[derive(SerializeDto, DeserializeDto, PartialEq, Debug)]
-+#[serde(tag = "T")]
-+enum EnumWithCustomTag {
-+    Unit,
-+    Named { field: String },
-+}
-+
-+#[test]
-+fn test_enum_unit_memeber_with_custom_tag_serialization() {
-+    let value = EnumWithCustomTag::Unit;
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(serialized, json!("Unit"));
-+}
-+
-+#[test]
-+fn test_enum_unit_memeber_with_custom_tag_deserialization() {
-+    let value = json!("Unit");
-+    let deserialized: EnumWithCustomTag = json::from_value(value).unwrap();
-+    assert_eq!(deserialized, EnumWithCustomTag::Unit);
-+}
-+
-+#[test]
-+fn test_enum_member_with_named_field_with_custom_tag_serialization() {
-+    let value = EnumWithCustomTag::Named {
-+        field: "named".to_string(),
-+    };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(
-+        serialized,
-+        json!({
-+            "T": "Named",
-+            "field": "named"
-+        }),
-+    );
-+}
-+
-+#[test]
-+fn test_enum_member_with_custom_tag_deserialization() {
-+    let value = json!({ "T": "Named", "field": "named" });
-+    let deserialized: EnumWithCustomTag = json::from_value(value).unwrap();
-+    assert_eq!(
-+        deserialized,
-+        EnumWithCustomTag::Named {
-+            field: "named".to_string(),
-+        },
-+    );
-+}
-+
-+#[derive(SerializeDto, DeserializeDto, PartialEq, Debug)]
-+enum EnumWithSkippedMember {
-+    #[serde(skip)]
-+    Unit,
-+    #[allow(dead_code)]
-+    Named { field: String },
-+}
-+
-+#[test]
-+fn test_enum_unit_memeber_with_skipped_member_serialization() {
-+    let value = EnumWithSkippedMember::Unit;
-+    let serialized = json::to_value(&value);
-+    assert!(serialized.is_err());
-+}
-+
-+#[test]
-+fn test_enum_unit_memeber_with_skipped_member_deserialization() {
-+    let value = json!("Unit");
-+    let deserialized: Result<EnumWithSkippedMember, _> = json::from_value(value);
-+    assert!(deserialized.is_err());
-+}
-+
-+#[derive(SerializeDto, PartialEq, Debug)]
-+enum EnumWithSkippedField {
-+    #[allow(dead_code)]
-+    Unit,
-+    Named {
-+        field: String,
-+        #[serde(skip)]
-+        _skipped: String,
-+    },
-+}
-+
-+#[test]
-+fn test_enum_with_skipped_field_serialization() {
-+    let value = EnumWithSkippedField::Named {
-+        field: "named".to_string(),
-+        _skipped: "skipped".to_string(),
-+    };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(serialized, json!({ "TAG": "Named", "field": "named" }));
-+}
-+
-+#[derive(SerializeDto, PartialEq, Debug)]
-+enum EnumWithSkippedIfField {
-+    Named {
-+        #[serde(skip_serializing_if = "Option::is_none")]
-+        field: Option<String>,
-+    },
-+}
-+
-+#[test]
-+fn test_enum_with_some_skipped_if_field_serialization() {
-+    let value = EnumWithSkippedIfField::Named {
-+        field: Some("named".to_string()),
-+    };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(serialized, json!({ "TAG": "Named", "field": "named" }));
-+}
-+
-+#[test]
-+fn test_enum_with_none_skipped_if_field_serialization() {
-+    let value = EnumWithSkippedIfField::Named { field: None };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(serialized, json!({ "TAG": "Named" }));
-+}
-+
-+#[derive(SerializeDto, PartialEq, Debug)]
-+enum EnumWithUntaggedNamedMember {
-+    #[serde(untagged)]
-+    Named {
-+        #[serde(skip_serializing_if = "Option::is_none")]
-+        field_a: Option<usize>,
-+        #[serde(skip)]
-+        _field_b: usize,
-+    },
-+}
-+
-+#[test]
-+fn test_enum_with_untagged_named_member_serialization() {
-+    let value = EnumWithUntaggedNamedMember::Named {
-+        field_a: Some(42),
-+        _field_b: 0,
-+    };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(serialized, json!({ "fieldA": 42 }));
-+}
-+
-+#[test]
-+fn test_enum_with_empty_untagged_named_member_serialization() {
-+    let value = EnumWithUntaggedNamedMember::Named {
-+        field_a: None,
-+        _field_b: 0,
-+    };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(serialized, json!({}));
-+}
-+
-+#[derive(SerializeDto, PartialEq, Debug)]
-+enum EnumWithUnnamedMember {
-+    #[allow(dead_code)]
-+    Unit,
-+    Unnamed(#[serde(skip)] usize),
-+}
-+
-+#[test]
-+fn test_enum_with_unnamed_member_serialization() {
-+    let value = EnumWithUnnamedMember::Unnamed(42);
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(serialized, json!("Unnamed"));
-+}
-+
-+#[derive(SerializeDto, DeserializeDto, PartialEq, Debug)]
-+enum EnumWithUntaggedUnnamedMember {
-+    #[allow(dead_code)]
-+    Unit,
-+    #[serde(untagged)]
-+    Unnamed(ChildEnumForUntaggedUnnamedEnum),
-+}
-+
-+#[derive(SerializeDto, DeserializeDto, PartialEq, Debug)]
-+enum ChildEnumForUntaggedUnnamedEnum {
-+    A,
-+    B { x: usize },
-+}
-+
-+#[test]
-+fn test_enum_with_untagged_unnamed_member_serialization() {
-+    let value =
-+        EnumWithUntaggedUnnamedMember::Unnamed(ChildEnumForUntaggedUnnamedEnum::B { x: 42 });
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(serialized, json!({ "TAG": "B", "x": 42 }));
-+}
-+
-+#[test]
-+fn test_enum_with_untagged_unnamed_member_deserialization() {
-+    let value = json!({ "TAG": "B", "x": 42 });
-+    let deserialized: EnumWithUntaggedUnnamedMember = json::from_value(value).unwrap();
-+    assert_eq!(
-+        deserialized,
-+        EnumWithUntaggedUnnamedMember::Unnamed(ChildEnumForUntaggedUnnamedEnum::B { x: 42 })
-+    );
-+}
-diff --git a/tests/struct.rs b/tests/struct.rs
-new file mode 100644
-index 0000000..23ae6ed
---- /dev/null
-+++ b/tests/struct.rs
-@@ -0,0 +1,162 @@
-+use serde_derive_rescript::{DeserializeDto, SerializeDto};
-+use serde_json::{self as json, json};
-+
-+#[derive(SerializeDto, DeserializeDto, PartialEq, Debug)]
-+struct BasicStruct {
-+    field_a: usize,
-+    field_b: String,
-+}
-+
-+#[test]
-+fn test_struct_serialization() {
-+    let value = BasicStruct {
-+        field_a: 42,
-+        field_b: "hello".to_string(),
-+    };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(
-+        serialized,
-+        json!({
-+            "fieldA": 42,
-+            "fieldB": "hello"
-+        }),
-+    );
-+}
-+
-+#[test]
-+fn test_struct_deserialization() {
-+    let value = json!({
-+        "fieldA": 42,
-+        "fieldB": "hello"
-+    });
-+    let deserialized: BasicStruct = json::from_value(value).unwrap();
-+    assert_eq!(
-+        deserialized,
-+        BasicStruct {
-+            field_a: 42,
-+            field_b: "hello".to_string()
-+        },
-+    );
-+}
-+
-+#[derive(SerializeDto, DeserializeDto, PartialEq, Debug)]
-+#[serde(rename_all = "kebab-case")]
-+struct StructWithRenameAllRule {
-+    field_a: usize,
-+    field_b: String,
-+}
-+
-+#[test]
-+fn test_struct_with_rename_all_rule_serialization() {
-+    let value = StructWithRenameAllRule {
-+        field_a: 42,
-+        field_b: "hello".to_string(),
-+    };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(
-+        serialized,
-+        json!({
-+            "field-a": 42,
-+            "field-b": "hello"
-+        }),
-+    );
-+}
-+
-+#[test]
-+fn test_struct_with_rename_all_rule_deserialization() {
-+    let value = json!({
-+        "field-a": 42,
-+        "field-b": "hello"
-+    });
-+    let deserialized: StructWithRenameAllRule = json::from_value(value).unwrap();
-+    assert_eq!(
-+        deserialized,
-+        StructWithRenameAllRule {
-+            field_a: 42,
-+            field_b: "hello".to_string(),
-+        },
-+    );
-+}
-+
-+#[derive(SerializeDto, DeserializeDto, PartialEq, Debug)]
-+struct StructWithRenamedField {
-+    field_a: usize,
-+    #[serde(rename = "field-b")]
-+    field_b: String,
-+}
-+
-+#[test]
-+fn test_struct_with_renamed_field_serialization() {
-+    let value = StructWithRenamedField {
-+        field_a: 42,
-+        field_b: "hello".to_string(),
-+    };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(
-+        serialized,
-+        json!({
-+            "fieldA": 42,
-+            "field-b": "hello"
-+        })
-+    );
-+}
-+
-+#[test]
-+fn test_struct_with_renamed_field_deserialization() {
-+    let value = json!({
-+        "fieldA": 42,
-+        "field-b": "hello"
-+    });
-+    let deserialized: StructWithRenamedField = json::from_value(value).unwrap();
-+    assert_eq!(
-+        deserialized,
-+        StructWithRenamedField {
-+            field_a: 42,
-+            field_b: "hello".to_string()
-+        }
-+    );
-+}
-+
-+#[derive(SerializeDto, PartialEq, Debug)]
-+struct StructWithSkippedField {
-+    field_a: usize,
-+    #[serde(skip)]
-+    field_b: String,
-+}
-+
-+#[test]
-+fn test_struct_with_skipped_field_serialization() {
-+    let value = StructWithSkippedField {
-+        field_a: 42,
-+        field_b: "hello".to_string(),
-+    };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(serialized, json!({ "fieldA": 42 }));
-+}
-+
-+#[derive(SerializeDto, PartialEq, Debug)]
-+struct StructWithSkippedIfField {
-+    field_a: usize,
-+    #[serde(skip_serializing_if = "Option::is_none")]
-+    field_b: Option<String>,
-+}
-+
-+#[test]
-+fn test_struct_with_some_skipped_if_field_serialization() {
-+    let value = StructWithSkippedIfField {
-+        field_a: 42,
-+        field_b: Some("hello".to_string()),
-+    };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(serialized, json!({ "fieldA": 42, "fieldB": "hello" }));
-+}
-+
-+#[test]
-+fn test_struct_with_none_skipped_if_field_serialization() {
-+    let value = StructWithSkippedIfField {
-+        field_a: 42,
-+        field_b: None,
-+    };
-+    let serialized = json::to_value(&value).unwrap();
-+    assert_eq!(serialized, json!({ "fieldA": 42 }));
-+}
+             (attr::TagType::Adjacent { tag, content }, false) => {
+                 serialize_adjacently_tagged_variant(

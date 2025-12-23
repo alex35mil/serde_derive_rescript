@@ -1,8 +1,9 @@
+use crate::deprecated::allow_deprecated;
 use crate::fragment::{Fragment, Match, Stmts};
 use crate::internals::ast::{Container, Data, Field, Style, Variant};
 use crate::internals::name::Name;
 use crate::internals::{attr, replace_receiver, Ctxt, Derive};
-use crate::{bound, dummy, pretend, rescript, this};
+use crate::{bound, dummy, pretend, private, rescript, this};
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, quote_spanned};
 use syn::spanned::Spanned;
@@ -12,9 +13,8 @@ pub fn expand_derive_serialize(input: &mut syn::DeriveInput) -> syn::Result<Toke
     replace_receiver(input);
 
     let ctxt = Ctxt::new();
-    let cont = match Container::from_ast(&ctxt, input, Derive::Serialize) {
-        Some(cont) => cont,
-        None => return Err(ctxt.check().unwrap_err()),
+    let Some(cont) = Container::from_ast(&ctxt, input, Derive::Serialize, &private.ident()) else {
+        return Err(ctxt.check().unwrap_err());
     };
     precondition(&ctxt, &cont);
     ctxt.check()?;
@@ -23,17 +23,18 @@ pub fn expand_derive_serialize(input: &mut syn::DeriveInput) -> syn::Result<Toke
     let params = Parameters::new(&cont);
     let (impl_generics, ty_generics, where_clause) = params.generics.split_for_impl();
     let body = Stmts(serialize_body(&cont, &params));
-    let serde = cont.attrs.serde_path();
+    let allow_deprecated = allow_deprecated(input);
 
     let impl_block = if let Some(remote) = cont.attrs.remote() {
         let vis = &input.vis;
         let used = pretend::pretend_used(&cont, params.is_packed);
         quote! {
             #[automatically_derived]
+            #allow_deprecated
             impl #impl_generics #ident #ty_generics #where_clause {
-                #vis fn serialize<__S>(__self: &#remote #ty_generics, __serializer: __S) -> #serde::__private::Result<__S::Ok, __S::Error>
+                #vis fn serialize<__S>(__self: &#remote #ty_generics, __serializer: __S) -> _serde::#private::Result<__S::Ok, __S::Error>
                 where
-                    __S: #serde::Serializer,
+                    __S: _serde::Serializer,
                 {
                     #used
                     #body
@@ -43,10 +44,11 @@ pub fn expand_derive_serialize(input: &mut syn::DeriveInput) -> syn::Result<Toke
     } else {
         quote! {
             #[automatically_derived]
-            impl #impl_generics #serde::Serialize for #ident #ty_generics #where_clause {
-                fn serialize<__S>(&self, __serializer: __S) -> #serde::__private::Result<__S::Ok, __S::Error>
+            #allow_deprecated
+            impl #impl_generics _serde::Serialize for #ident #ty_generics #where_clause {
+                fn serialize<__S>(&self, __serializer: __S) -> _serde::#private::Result<__S::Ok, __S::Error>
                 where
-                    __S: #serde::Serializer,
+                    __S: _serde::Serializer,
                 {
                     #body
                 }
@@ -212,7 +214,7 @@ fn serialize_into(params: &Parameters, type_into: &syn::Type) -> Fragment {
     let self_var = &params.self_var;
     quote_block! {
         _serde::Serialize::serialize(
-            &_serde::__private::Into::<#type_into>::into(_serde::__private::Clone::clone(#self_var)),
+            &_serde::#private::Into::<#type_into>::into(_serde::#private::Clone::clone(#self_var)),
             __serializer)
     }
 }
@@ -382,7 +384,7 @@ fn serialize_struct_as_map(
     let let_mut = mut_if(serialized_fields.peek().is_some() || tag_field_exists);
 
     quote_block! {
-        let #let_mut __serde_state = _serde::Serializer::serialize_map(__serializer, _serde::__private::None)?;
+        let #let_mut __serde_state = _serde::Serializer::serialize_map(__serializer, _serde::#private::None)?;
         #tag_field
         #(#serialize_fields)*
         _serde::ser::SerializeMap::end(__serde_state)
@@ -392,8 +394,10 @@ fn serialize_struct_as_map(
 fn serialize_enum(params: &Parameters, variants: &[Variant], cattrs: &attr::Container) -> Fragment {
     assert!(variants.len() as u64 <= u64::from(u32::MAX));
 
-    let self_var = &params.self_var;
+    // ReScript: detect mixed enums (both unit and struct variants)
     let is_mixed = rescript::is_mixed_enum(variants);
+
+    let self_var = &params.self_var;
 
     let mut arms: Vec<_> = variants
         .iter()
@@ -405,7 +409,7 @@ fn serialize_enum(params: &Parameters, variants: &[Variant], cattrs: &attr::Cont
 
     if cattrs.remote().is_some() && cattrs.non_exhaustive() {
         arms.push(quote! {
-            ref unrecognized => _serde::__private::Err(_serde::ser::Error::custom(_serde::__private::ser::CannotSerializeVariant(unrecognized))),
+            ref unrecognized => _serde::#private::Err(_serde::ser::Error::custom(_serde::#private::ser::CannotSerializeVariant(unrecognized))),
         });
     }
 
@@ -433,7 +437,7 @@ fn serialize_variant(
             variant_ident
         );
         let skipped_err = quote! {
-            _serde::__private::Err(_serde::ser::Error::custom(#skipped_msg))
+            _serde::#private::Err(_serde::ser::Error::custom(#skipped_msg))
         };
         let fields_pat = match variant.style {
             Style::Unit => quote!(),
@@ -471,83 +475,64 @@ fn serialize_variant(
             }
         };
 
-        let body = Match(if is_mixed_enum {
-            // For mixed enums with external tagging, use custom serialization
-            let variant_name = variant.attrs.name().serialize_name();
-            match variant.style {
-                Style::Unit => {
-                    // Unit variants are serialized as strings
-                    quote_expr! {
-                        _serde::Serializer::serialize_str(__serializer, #variant_name)
+        let body = Match(match (cattrs.tag(), variant.attrs.untagged()) {
+            (attr::TagType::External, false) => {
+                // ReScript: handle mixed enums and struct-only enums specially
+                if is_mixed_enum {
+                    match variant.style {
+                        Style::Unit => {
+                            // Unit variants in mixed enums serialize as strings
+                            let variant_name = variant.attrs.name().serialize_name();
+                            quote_expr! {
+                                _serde::Serializer::serialize_str(__serializer, #variant_name)
+                            }
+                        }
+                        Style::Struct => {
+                            // Struct variants in mixed enums use internal tagging with TAG
+                            let tag = rescript::get_effective_tag(cattrs);
+                            serialize_internally_tagged_variant(params, variant, cattrs, &tag)
+                        }
+                        _ => {
+                            // Newtype/Tuple: fall back to external tagging
+                            serialize_externally_tagged_variant(
+                                params,
+                                variant,
+                                variant_index,
+                                cattrs,
+                            )
+                        }
                     }
-                }
-                Style::Struct => {
-                    // Named variants are serialized with internal tagging using effective tag
+                } else if matches!(variant.style, Style::Struct) {
+                    // Non-mixed struct variants also use internal tagging with TAG
                     let tag = rescript::get_effective_tag(cattrs);
                     serialize_internally_tagged_variant(params, variant, cattrs, &tag)
-                }
-                Style::Newtype | Style::Tuple => {
-                    // For newtype and tuple variants, fall back to external tagging
-                    // Those shouldn't be used for ReScript DTOs anyways, so doesn't matter
+                } else {
                     serialize_externally_tagged_variant(params, variant, variant_index, cattrs)
                 }
             }
-        } else if matches!(variant.style, Style::Struct)
-            && matches!(cattrs.tag(), attr::TagType::External)
-            && !variant.attrs.untagged()
-        {
-            // For non-mixed enums with struct variants and external tagging, use internal tagging
-            let tag = rescript::get_effective_tag(cattrs);
-            serialize_internally_tagged_variant(params, variant, cattrs, &tag)
-        } else {
-            // Original behavior for non-mixed enums or different tag types
-            match (cattrs.tag(), variant.attrs.untagged()) {
-                (attr::TagType::External, false) => {
-                    serialize_externally_tagged_variant(params, variant, variant_index, cattrs)
-                }
-                (attr::TagType::Internal { tag }, false) => {
-                    if is_mixed_enum {
-                        // For mixed enums with internal tagging, use custom serialization
-                        let variant_name = variant.attrs.name().serialize_name();
-                        match variant.style {
-                            Style::Unit => {
-                                // Unit variants are serialized as strings
-                                quote_expr! {
-                                    _serde::Serializer::serialize_str(__serializer, #variant_name)
-                                }
-                            }
-                            Style::Struct => {
-                                // Named variants are serialized with internal tagging using effective tag
-                                let tag = rescript::get_effective_tag(cattrs);
-                                serialize_internally_tagged_variant(params, variant, cattrs, &tag)
-                            }
-                            Style::Newtype | Style::Tuple => {
-                                // For newtype and tuple variants, fall back to external tagging
-                                serialize_externally_tagged_variant(
-                                    params,
-                                    variant,
-                                    variant_index,
-                                    cattrs,
-                                )
-                            }
-                        }
-                    } else {
-                        serialize_internally_tagged_variant(params, variant, cattrs, tag)
+            (attr::TagType::Internal { tag }, false) => {
+                // ReScript: in mixed enums, unit variants serialize as plain strings
+                if is_mixed_enum && matches!(variant.style, Style::Unit) {
+                    let variant_name = variant.attrs.name().serialize_name();
+                    quote_expr! {
+                        _serde::Serializer::serialize_str(__serializer, #variant_name)
                     }
+                } else {
+                    serialize_internally_tagged_variant(params, variant, cattrs, tag)
                 }
-                (attr::TagType::Adjacent { tag, content }, false) => {
-                    serialize_adjacently_tagged_variant(
-                        params,
-                        variant,
-                        cattrs,
-                        variant_index,
-                        tag,
-                        content,
-                    )
-                }
-                (attr::TagType::None, _) | (_, true) => {
-                    serialize_untagged_variant(params, variant, cattrs)
-                }
+            }
+            (attr::TagType::Adjacent { tag, content }, false) => {
+                serialize_adjacently_tagged_variant(
+                    params,
+                    variant,
+                    cattrs,
+                    variant_index,
+                    tag,
+                    content,
+                )
+            }
+            (attr::TagType::None, _) | (_, true) => {
+                serialize_untagged_variant(params, variant, cattrs)
             }
         });
 
@@ -645,7 +630,7 @@ fn serialize_internally_tagged_variant(
     if let Some(path) = variant.attrs.serialize_with() {
         let ser = wrap_serialize_variant_with(params, path, variant);
         return quote_expr! {
-            _serde::__private::ser::serialize_tagged_newtype(
+            _serde::#private::ser::serialize_tagged_newtype(
                 __serializer,
                 #enum_ident_str,
                 #variant_ident_str,
@@ -674,7 +659,7 @@ fn serialize_internally_tagged_variant(
             }
 
             let span = field.original.span();
-            let func = quote_spanned!(span=> _serde::__private::ser::serialize_tagged_newtype);
+            let func = quote_spanned!(span=> _serde::#private::ser::serialize_tagged_newtype);
             quote_expr! {
                 #func(
                     __serializer,
@@ -708,7 +693,7 @@ fn serialize_adjacently_tagged_variant(
     let type_name = cattrs.name().serialize_name();
     let variant_name = variant.attrs.name().serialize_name();
     let serialize_variant = quote! {
-        &_serde::__private::ser::AdjacentlyTaggedEnumVariant {
+        &_serde::#private::ser::AdjacentlyTaggedEnumVariant {
             enum_name: #type_name,
             variant_index: #variant_index,
             variant_name: #variant_name,
@@ -791,12 +776,12 @@ fn serialize_adjacently_tagged_variant(
         #[doc(hidden)]
         struct __AdjacentlyTagged #wrapper_generics #where_clause {
             data: (#(&'__a #fields_ty,)*),
-            phantom: _serde::__private::PhantomData<#this_type #ty_generics>,
+            phantom: _serde::#private::PhantomData<#this_type #ty_generics>,
         }
 
         #[automatically_derived]
         impl #wrapper_impl_generics _serde::Serialize for __AdjacentlyTagged #wrapper_ty_generics #where_clause {
-            fn serialize<__S>(&self, __serializer: __S) -> _serde::__private::Result<__S::Ok, __S::Error>
+            fn serialize<__S>(&self, __serializer: __S) -> _serde::#private::Result<__S::Ok, __S::Error>
             where
                 __S: _serde::Serializer,
             {
@@ -814,7 +799,7 @@ fn serialize_adjacently_tagged_variant(
         _serde::ser::SerializeStruct::serialize_field(
             &mut __struct, #content, &__AdjacentlyTagged {
                 data: (#(#fields_ident,)*),
-                phantom: _serde::__private::PhantomData::<#this_type #ty_generics>,
+                phantom: _serde::#private::PhantomData::<#this_type #ty_generics>,
             })?;
         _serde::ser::SerializeStruct::end(__struct)
     }
@@ -1056,19 +1041,19 @@ fn serialize_struct_variant_with_flatten(
                 #[doc(hidden)]
                 struct __EnumFlatten #wrapper_generics #where_clause {
                     data: (#(&'__a #fields_ty,)*),
-                    phantom: _serde::__private::PhantomData<#this_type #ty_generics>,
+                    phantom: _serde::#private::PhantomData<#this_type #ty_generics>,
                 }
 
                 #[automatically_derived]
                 impl #wrapper_impl_generics _serde::Serialize for __EnumFlatten #wrapper_ty_generics #where_clause {
-                    fn serialize<__S>(&self, __serializer: __S) -> _serde::__private::Result<__S::Ok, __S::Error>
+                    fn serialize<__S>(&self, __serializer: __S) -> _serde::#private::Result<__S::Ok, __S::Error>
                     where
                         __S: _serde::Serializer,
                     {
                         let (#(#members,)*) = self.data;
                         let #let_mut __serde_state = _serde::Serializer::serialize_map(
                             __serializer,
-                            _serde::__private::None)?;
+                            _serde::#private::None)?;
                         #(#serialize_fields)*
                         _serde::ser::SerializeMap::end(__serde_state)
                     }
@@ -1081,7 +1066,7 @@ fn serialize_struct_variant_with_flatten(
                     #variant_name,
                     &__EnumFlatten {
                         data: (#(#members,)*),
-                        phantom: _serde::__private::PhantomData::<#this_type #ty_generics>,
+                        phantom: _serde::#private::PhantomData::<#this_type #ty_generics>,
                     })
             }
         }
@@ -1089,7 +1074,7 @@ fn serialize_struct_variant_with_flatten(
             quote_block! {
                 let #let_mut __serde_state = _serde::Serializer::serialize_map(
                     __serializer,
-                    _serde::__private::None)?;
+                    _serde::#private::None)?;
                 _serde::ser::SerializeMap::serialize_entry(
                     &mut __serde_state,
                     #tag,
@@ -1103,7 +1088,7 @@ fn serialize_struct_variant_with_flatten(
             quote_block! {
                 let #let_mut __serde_state = _serde::Serializer::serialize_map(
                     __serializer,
-                    _serde::__private::None)?;
+                    _serde::#private::None)?;
                 #(#serialize_fields)*
                 _serde::ser::SerializeMap::end(__serde_state)
             }
@@ -1192,7 +1177,7 @@ fn serialize_struct_visitor(
             let ser = if field.attrs.flatten() {
                 let func = quote_spanned!(span=> _serde::Serialize::serialize);
                 quote! {
-                    #func(&#field_expr, _serde::__private::ser::FlatMapSerializer(&mut __serde_state))?;
+                    #func(&#field_expr, _serde::#private::ser::FlatMapSerializer(&mut __serde_state))?;
                 }
             } else {
                 let func = struct_trait.serialize_field(span);
@@ -1295,16 +1280,16 @@ fn wrap_serialize_with(
         #serialize_with(#(#self_var.values.#field_access, )* #serializer_var)
     };
 
-    quote!({
+    quote!(&{
         #[doc(hidden)]
         struct __SerializeWith #wrapper_impl_generics #where_clause {
             values: (#(&'__a #field_tys, )*),
-            phantom: _serde::__private::PhantomData<#this_type #ty_generics>,
+            phantom: _serde::#private::PhantomData<#this_type #ty_generics>,
         }
 
         #[automatically_derived]
         impl #wrapper_impl_generics _serde::Serialize for __SerializeWith #wrapper_ty_generics #where_clause {
-            fn serialize<__S>(&#self_var, #serializer_var: __S) -> _serde::__private::Result<__S::Ok, __S::Error>
+            fn serialize<__S>(&#self_var, #serializer_var: __S) -> _serde::#private::Result<__S::Ok, __S::Error>
             where
                 __S: _serde::Serializer,
             {
@@ -1312,9 +1297,9 @@ fn wrap_serialize_with(
             }
         }
 
-        &__SerializeWith {
+        __SerializeWith {
             values: (#(#field_exprs, )*),
-            phantom: _serde::__private::PhantomData::<#this_type #ty_generics>,
+            phantom: _serde::#private::PhantomData::<#this_type #ty_generics>,
         }
     })
 }
@@ -1350,11 +1335,11 @@ fn get_member(params: &Parameters, field: &Field, member: &Member) -> TokenStrea
                 quote!(&#self_var.#member)
             };
             let ty = field.ty;
-            quote!(_serde::__private::ser::constrain::<#ty>(#inner))
+            quote!(_serde::#private::ser::constrain::<#ty>(#inner))
         }
         (true, Some(getter)) => {
             let ty = field.ty;
-            quote!(_serde::__private::ser::constrain::<#ty>(&#getter(#self_var)))
+            quote!(_serde::#private::ser::constrain::<#ty>(&#getter(#self_var)))
         }
         (false, Some(_)) => {
             unreachable!("getter is only allowed for remote impls");

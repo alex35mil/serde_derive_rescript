@@ -40,11 +40,32 @@ module NameError = {
 
 ---
 
+#### Serde Version
+
+Starting from serde 1.0.225, serde uses versioned private modules (`__private225`, `__private226`, etc.) that must match between serde and serde_derive. Since this is a fork with its own versioning, we mirror serde's version to maintain compatibility.
+
+You must use the matching serde version:
+
+```toml
+[dependencies]
+serde = "1.0.228"
+
+# Option 1: Latest on main (gets bug fixes automatically)
+serde_derive_rescript = { git = "https://github.com/alex35mil/serde_derive_rescript", branch = "main" }
+
+# Option 2: Pinned to specific commit
+serde_derive_rescript = { git = "https://github.com/alex35mil/serde_derive_rescript", rev = "abc1234" }
+```
+
+Cargo will fail with a version conflict if serde versions don't match.
+
+---
+
 I didn't publish this crate anywhere. I'm using it in my project from this repo. I can push it to crates if there's any interest - let me know in the issues.
 
 ---
 
-Base commit: [`babafa54d283fb087fa94f50a2cf82fa9e582a7c`](https://github.com/serde-rs/serde/commit/babafa54d283fb087fa94f50a2cf82fa9e582a7c)
+Base commit: [`d17902059e77e371d8a7f83ff403f9e760b70f45`](https://github.com/serde-rs/serde/commit/d17902059e77e371d8a7f83ff403f9e760b70f45)
 
 ---
 

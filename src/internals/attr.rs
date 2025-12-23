@@ -3,14 +3,13 @@ use crate::internals::symbol::*;
 use crate::internals::{ungroup, Ctxt};
 use proc_macro2::{Spacing, Span, TokenStream, TokenTree};
 use quote::ToTokens;
-use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::iter::FromIterator;
 use syn::meta::ParseNestedMeta;
 use syn::parse::ParseStream;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
-use syn::{parse_quote, token, Ident, Lifetime, Token};
+use syn::{token, Ident, Lifetime, Token};
 
 // This module handles parsing of `#[serde(...)]` attributes. The entrypoints
 // are `attr::Container::from_ast`, `attr::Variant::from_ast`, and
@@ -517,6 +516,7 @@ impl Container {
             }
         }
 
+        // ReScript modification: default to camelCase for struct fields
         let default_rename_all_rule = match &item.data {
             syn::Data::Struct(_) => RenameRule::CamelCase,
             syn::Data::Enum(_) => RenameRule::None,
@@ -617,11 +617,6 @@ impl Container {
 
     pub fn custom_serde_path(&self) -> Option<&syn::Path> {
         self.serde_path.as_ref()
-    }
-
-    pub fn serde_path(&self) -> Cow<syn::Path> {
-        self.custom_serde_path()
-            .map_or_else(|| Cow::Owned(parse_quote!(_serde)), Cow::Borrowed)
     }
 
     /// Error message generated when type can't be deserialized.
@@ -1034,6 +1029,7 @@ impl Field {
         field: &syn::Field,
         attrs: Option<&Variant>,
         container_default: &Default,
+        private: &Ident,
     ) -> Self {
         let mut ser_name = Attr::none(cx, RENAME);
         let mut de_name = Attr::none(cx, RENAME);
@@ -1200,13 +1196,11 @@ impl Field {
             }
         }
 
-        // Is skip_deserializing, initialize the field to Default::default() unless a
+        // If skip_deserializing, initialize the field to Default::default() unless a
         // different default is specified by `#[serde(default = "...")]` on
         // ourselves or our container (e.g. the struct we are in).
-        if let Default::None = *container_default {
-            if skip_deserializing.0.value.is_some() {
-                default.set_if_none(Default::Default);
-            }
+        if container_default.is_none() && skip_deserializing.0.value.is_some() {
+            default.set_if_none(Default::Default);
         }
 
         let mut borrowed_lifetimes = borrowed_lifetimes.get().unwrap_or_default();
@@ -1227,7 +1221,7 @@ impl Field {
                 };
                 let span = Span::call_site();
                 path.segments.push(Ident::new("_serde", span).into());
-                path.segments.push(Ident::new("__private", span).into());
+                path.segments.push(private.clone().into());
                 path.segments.push(Ident::new("de", span).into());
                 path.segments
                     .push(Ident::new("borrow_cow_str", span).into());
@@ -1244,7 +1238,7 @@ impl Field {
                 };
                 let span = Span::call_site();
                 path.segments.push(Ident::new("_serde", span).into());
-                path.segments.push(Ident::new("__private", span).into());
+                path.segments.push(private.clone().into());
                 path.segments.push(Ident::new("de", span).into());
                 path.segments
                     .push(Ident::new("borrow_cow_bytes", span).into());
@@ -1474,9 +1468,8 @@ fn parse_lit_into_path(
     attr_name: Symbol,
     meta: &ParseNestedMeta,
 ) -> syn::Result<Option<syn::Path>> {
-    let string = match get_lit_str(cx, attr_name, meta)? {
-        Some(string) => string,
-        None => return Ok(None),
+    let Some(string) = get_lit_str(cx, attr_name, meta)? else {
+        return Ok(None);
     };
 
     Ok(match string.parse() {
@@ -1496,9 +1489,8 @@ fn parse_lit_into_expr_path(
     attr_name: Symbol,
     meta: &ParseNestedMeta,
 ) -> syn::Result<Option<syn::ExprPath>> {
-    let string = match get_lit_str(cx, attr_name, meta)? {
-        Some(string) => string,
-        None => return Ok(None),
+    let Some(string) = get_lit_str(cx, attr_name, meta)? else {
+        return Ok(None);
     };
 
     Ok(match string.parse() {
@@ -1519,9 +1511,8 @@ fn parse_lit_into_where(
     meta_item_name: Symbol,
     meta: &ParseNestedMeta,
 ) -> syn::Result<Vec<syn::WherePredicate>> {
-    let string = match get_lit_str2(cx, attr_name, meta_item_name, meta)? {
-        Some(string) => string,
-        None => return Ok(Vec::new()),
+    let Some(string) = get_lit_str2(cx, attr_name, meta_item_name, meta)? else {
+        return Ok(Vec::new());
     };
 
     Ok(
@@ -1540,9 +1531,8 @@ fn parse_lit_into_ty(
     attr_name: Symbol,
     meta: &ParseNestedMeta,
 ) -> syn::Result<Option<syn::Type>> {
-    let string = match get_lit_str(cx, attr_name, meta)? {
-        Some(string) => string,
-        None => return Ok(None),
+    let Some(string) = get_lit_str(cx, attr_name, meta)? else {
+        return Ok(None);
     };
 
     Ok(match string.parse() {
@@ -1563,9 +1553,8 @@ fn parse_lit_into_lifetimes(
     cx: &Ctxt,
     meta: &ParseNestedMeta,
 ) -> syn::Result<BTreeSet<syn::Lifetime>> {
-    let string = match get_lit_str(cx, BORROW, meta)? {
-        Some(string) => string,
-        None => return Ok(BTreeSet::new()),
+    let Some(string) = get_lit_str(cx, BORROW, meta)? else {
+        return Ok(BTreeSet::new());
     };
 
     if let Ok(lifetimes) = string.parse_with(|input: ParseStream| {
@@ -1635,11 +1624,8 @@ fn is_cow(ty: &syn::Type, elem: fn(&syn::Type) -> bool) -> bool {
             return false;
         }
     };
-    let seg = match path.segments.last() {
-        Some(seg) => seg,
-        None => {
-            return false;
-        }
+    let Some(seg) = path.segments.last() else {
+        return false;
     };
     let args = match &seg.arguments {
         syn::PathArguments::AngleBracketed(bracketed) => &bracketed.args,
@@ -1662,11 +1648,8 @@ fn is_option(ty: &syn::Type, elem: fn(&syn::Type) -> bool) -> bool {
             return false;
         }
     };
-    let seg = match path.segments.last() {
-        Some(seg) => seg,
-        None => {
-            return false;
-        }
+    let Some(seg) = path.segments.last() else {
+        return false;
     };
     let args = match &seg.arguments {
         syn::PathArguments::AngleBracketed(bracketed) => &bracketed.args,
